@@ -1,0 +1,9 @@
+# tests/resources/simple_test.txt
+10 3 2
+# Union operations
+U 0 1
+U 2 3
+U 1 2
+# Find operations
+F 0 0
+F 3 0
