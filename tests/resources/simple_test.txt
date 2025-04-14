@@ -1,0 +1,12 @@
+# test_data_serial.txt
+# Format: n numUnions numQueries
+10 4 3
+# Union operations:
+0 1
+2 3
+1 4
+5 6
+# Query operations: format -> a b expected (1: connected, 0: not)
+0 4 1
+2 4 0
+5 6 1
