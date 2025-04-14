@@ -20,14 +20,18 @@ bool UnionFindParallelCoarse::unionSets(int a, int b) {
     std::lock_guard<std::recursive_mutex> guard(lock);
     int rootA = find(a);
     int rootB = find(b);
-    if (rootA == rootB) {
+    if (rootA == rootB) 
+    {
         return false;
     }
-    if (rank[rootA] < rank[rootB]) {
+    if (rank[rootA] < rank[rootB]) 
+    {
         parent[rootA] = rootB;
-    } else if (rank[rootA] > rank[rootB]) {
+    } else if (rank[rootA] > rank[rootB]) 
+    {
         parent[rootB] = rootA;
-    } else {
+    } else 
+    {
         parent[rootB] = rootA;
         ++rank[rootA];
     }

@@ -1,5 +1,5 @@
 CXX       := g++
-CXXFLAGS = -Wall -O3 -std=c++17 -m64 -I. -fopenmp -Wno-unknown-pragmas
+CXXFLAGS  := -std=c++20 -O3 -Wall -Wextra -Iinclude -fopenmp -Wno-unknown-pragmas
 
 # We can allow the user to enable/disable parallel variants (coarse/fine/lockfree)
 # and set a default thread count at compile time.
@@ -12,8 +12,8 @@ THREAD_COUNT ?= 4
 
 # If you’re using Google Test or Google Benchmark installed system-wide, 
 # you may need to tweak these to point to the correct include/library paths.
-GTEST_LIB  := -lgtest -lgtest_main -lpthread
-GBENCH_LIB := -lbenchmark -lpthread
+# GTEST_LIB  := -lgtest -lgtest_main -lpthread
+# GBENCH_LIB := -lbenchmark -lpthread
 
 ###############################################################################
 # Derived Compiler Flags
@@ -115,21 +115,21 @@ $(LIB_NAME): $(OBJ_FILES)
 # Test Executables
 ###############################################################################
 
-$(TEST_SERIAL_BIN): $(LIB_NAME) $(TEST_SERIAL_SRC)
-	@echo "Linking $@"
-	$(CXX) $(CXXFLAGS) $(TEST_SERIAL_SRC) -o $@ -L. -lunionfind $(GTEST_LIB)
+# $(TEST_SERIAL_BIN): $(LIB_NAME) $(TEST_SERIAL_SRC)
+# 	@echo "Linking $@"
+# 	$(CXX) $(CXXFLAGS) $(TEST_SERIAL_SRC) -o $@ -L. -lunionfind $(GTEST_LIB)
 
-$(TEST_PARALLEL_BIN): $(LIB_NAME) $(TEST_PARALLEL_SRC)
-	@echo "Linking $@"
-	$(CXX) $(CXXFLAGS) $(TEST_PARALLEL_SRC) -o $@ -L. -lunionfind $(GTEST_LIB)
+# $(TEST_PARALLEL_BIN): $(LIB_NAME) $(TEST_PARALLEL_SRC)
+# 	@echo "Linking $@"
+# 	$(CXX) $(CXXFLAGS) $(TEST_PARALLEL_SRC) -o $@ -L. -lunionfind $(GTEST_LIB)
 
 ###############################################################################
 # Benchmark Executable
 ###############################################################################
 
-$(BENCH_BIN): $(LIB_NAME) $(BENCH_SRC)
-	@echo "Linking $@"
-	$(CXX) $(CXXFLAGS) $(BENCH_SRC) -o $@ -L. -lunionfind $(GBENCH_LIB)
+# $(BENCH_BIN): $(LIB_NAME) $(BENCH_SRC)
+# 	@echo "Linking $@"
+# 	$(CXX) $(CXXFLAGS) $(BENCH_SRC) -o $@ -L. -lunionfind $(GBENCH_LIB)
 
 ###############################################################################
 # Convenience "run" Targets
