@@ -1,0 +1,11 @@
+# First line: n u q
+10 4 3
+# Union operations:
+U 0 1
+U 1 2
+U 3 4
+U 6 7
+# Connectivity queries:
+Q 0 2 1
+Q 0 3 0
+Q 6 7 1

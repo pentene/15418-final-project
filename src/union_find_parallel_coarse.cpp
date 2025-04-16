@@ -3,14 +3,16 @@
 
 UnionFindParallelCoarse::UnionFindParallelCoarse(int n)
     : parent(n), rank(n, 0) {
-    for (int i = 0; i < n; ++i) {
+    for (int i = 0; i < n; ++i) 
+    {
         parent[i] = i;
     }
 }
 
 int UnionFindParallelCoarse::find(int a) {
     std::lock_guard<std::recursive_mutex> guard(lock);
-    if (parent[a] != a) {
+    if (parent[a] != a) 
+    {
         parent[a] = find(parent[a]);
     }
     return parent[a];
