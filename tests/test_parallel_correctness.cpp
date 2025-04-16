@@ -6,10 +6,10 @@
 #include <vector>
 #include <omp.h>
 
-// Include parallel union find headers.
+// Include the parallel union find header.
 #include "union_find_parallel_coarse.hpp"
-#include "union_find_parallel_fine.hpp"
-#include "union_find_parallel_lockfree.hpp"
+// #include "union_find_parallel_fine.hpp"
+// #include "union_find_parallel_lockfree.hpp"
 
 // Helper function to trim whitespace from both ends.
 std::string trim(const std::string &s) {
@@ -20,7 +20,7 @@ std::string trim(const std::string &s) {
     return s.substr(start, end - start + 1);
 }
 
-// Structure to store a union operation.
+// Structure to store a union operation in the test file.
 struct UnionOp {
     int a;
     int b;
@@ -36,12 +36,23 @@ struct Query {
 // Structure to hold the complete test data.
 struct ParallelTestData {
     int n;                          // number of elements
-    std::vector<UnionOp> unionOps;  // union operations to be performed concurrently
-    std::vector<Query> queries;     // connectivity queries to be checked after all unions are done
+    std::vector<UnionOp> unionOps;  // union operations to be executed concurrently
+    std::vector<Query> queries;     // connectivity queries (executed after all unions)
 };
 
 // Function to load test data from a file.
-// The expected file format is as described above.
+// Expected file format (example):
+//   # first line: n u q
+//   10 4 3
+//   # union operations:
+//   U 0 1
+//   U 1 2
+//   U 3 4
+//   U 6 7
+//   # connectivity queries:
+//   Q 0 2 1
+//   Q 0 3 0
+//   Q 6 7 1
 ParallelTestData loadTestData(const std::string &filename) {
     std::ifstream infile(filename);
     if (!infile)
@@ -99,25 +110,35 @@ ParallelTestData loadTestData(const std::string &filename) {
 }
 
 // Template helper function to run the test on one file using a given Union-Find type.
-// UFType must provide a constructor UFType(int), a unionSets(int, int), and find(int).
+// UFType must provide a constructor UFType(int), unionSets(int, int),
+// find(int), and processOperations(const std::vector<Operation>&, std::vector<int>&).
 template <typename UFType>
 bool runTestForFile(const std::string &filename) {
     std::cout << "Processing test file: " << filename << std::endl;
     ParallelTestData data = loadTestData(filename);
     UFType uf(data.n);
 
-    // Process union operations concurrently.
-    std::vector<int> results(data.unionOps.size(), -1); // Initialize results for union operations.
-    uf.processOperations(data.unionOps, results);
+    // Convert test file's union operations into the library's Operation type.
+    std::vector<typename UFType::Operation> ops;
+    for (const auto &u : data.unionOps) {
+        // Explicitly construct an object of type UFType::Operation.
+        typename UFType::Operation op(UFType::OperationType::UNION_OP, u.a, u.b);
+        ops.push_back(op);
+    }
 
-    // Now verify connectivity queries.
+    // Process union operations concurrently using the library's processOperations method.
+    std::vector<int> results;
+    uf.processOperations(ops, results);
+
+    // Now verify connectivity queries sequentially.
     bool passed = true;
     for (size_t i = 0; i < data.queries.size(); i++) {
         Query q = data.queries[i];
-        // In both sequential and parallel versions, the check is that if q.expected==1 then
-        // uf.find(a) should equal uf.find(b); if q.expected==0 they should differ.
+        // Check: if q.expected == 1 then uf.find(q.a) should equal uf.find(q.b);
+        // otherwise, they should differ.
         bool connected = (uf.find(q.a) == uf.find(q.b));
-        std::cout << "Query (" << q.a << ", " << q.b << ") -> got " << connected
+        std::cout << "Query (" << q.a << ", " << q.b << ") -> got "
+                  << (connected ? "connected" : "not connected")
                   << ", expected " << (q.expected == 1 ? "connected" : "not connected") << "\n";
         if (connected != (q.expected == 1)) {
             std::cerr << "Mismatch for query (" << q.a << ", " << q.b << ")\n";
@@ -151,8 +172,10 @@ int main(int argc, char* argv[]) {
         if (strategy == "coarse") {
             result = runTestForFile<UnionFindParallelCoarse>(testFile);
         } else if (strategy == "fine") {
+            // Uncomment below if you have implemented the fine-grained version.
             // result = runTestForFile<UnionFindParallelFine>(testFile);
         } else if (strategy == "lockfree") {
+            // Uncomment below if you have implemented the lock-free version.
             // result = runTestForFile<UnionFindParallelLockFree>(testFile);
         } else {
             std::cerr << "Unknown strategy: " << strategy << "\n";
