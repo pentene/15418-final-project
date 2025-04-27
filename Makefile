@@ -64,13 +64,20 @@ TEST_SERIAL_BIN   := test_serial_correctness
 TEST_PARALLEL_BIN := test_parallel_correctness
 
 ###############################################################################
+# Benchmark Executables
+###############################################################################
+
+BENCHMARK_SRC := benchmarks/benchmark.cpp
+BENCHMARK_BIN := benchmark
+
+###############################################################################
 # Primary Targets
 ###############################################################################
 
 .PHONY: all clean test run_tests
 
 # Build all targets: library and test executables.
-all: $(LIB_NAME) $(TEST_SERIAL_BIN) $(TEST_PARALLEL_BIN)
+all: $(LIB_NAME) $(TEST_SERIAL_BIN) $(TEST_PARALLEL_BIN) $(BENCHMARK_BIN)
 
 # Build and run the tests.
 test: all run_tests
@@ -85,8 +92,9 @@ run_tests: $(TEST_SERIAL_BIN) $(TEST_PARALLEL_BIN)
 
 # Clean up generated files.
 clean:
-	@echo "Cleaning..."
-	rm -f $(OBJ_FILES) $(LIB_NAME) $(TEST_SERIAL_BIN) $(TEST_PARALLEL_BIN)
+    @echo "Cleaning..."
+    rm -f $(OBJ_FILES) $(LIB_NAME) $(TEST_SERIAL_BIN) $(TEST_PARALLEL_BIN) $(BENCHMARK_BIN) # Add benchmark bin here
+    # Also clean any object files specific to benchmark if needed
 
 ###############################################################################
 # Library Target: Build static library
@@ -115,3 +123,11 @@ $(TEST_SERIAL_BIN): $(TEST_SERIAL_SRC) $(LIB_NAME)
 $(TEST_PARALLEL_BIN): $(TEST_PARALLEL_SRC) $(LIB_NAME)
 	@echo "Linking $@ ..."
 	$(CXX) $(CXXFLAGS) $(TEST_PARALLEL_SRC) -o $(TEST_PARALLEL_BIN) -L. -lunionfind
+
+###############################################################################
+# Linking Benchmark Executable
+###############################################################################
+# Rule to link the benchmark executable
+$(BENCHMARK_BIN): $(BENCHMARK_SRC) $(LIB_NAME)
+    @echo "Linking $@ ..."
+    $(CXX) $(CXXFLAGS) $(BENCHMARK_SRC) -o $(BENCHMARK_BIN) -L. -lunionfind
