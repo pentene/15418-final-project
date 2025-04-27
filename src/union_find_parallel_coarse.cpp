@@ -61,6 +61,15 @@ bool UnionFindParallelCoarse::unionSets(int a, int b) {
     return true; // A union occurred.
 }
 
+bool UnionFindParallelCoarse::sameSet(int a, int b) {
+    // Precondition: Element indices 'a' and 'b' must be within bounds.
+    assert(a >= 0 && a < num_elements && "Element index 'a' out of bounds in sameSet().");
+    assert(b >= 0 && b < num_elements && "Element index 'b' out of bounds in sameSet().");
+
+    std::lock_guard<std::recursive_mutex> guard(coarse_lock); // Lock before accessing shared data
+    return find(a) == find(b); // Check if they have the same root.
+}
+
 // Process a batch of operations in parallel (coarse-grained locking)
 void UnionFindParallelCoarse::processOperations(const std::vector<Operation>& ops, std::vector<int>& results) {
     size_t nOps = ops.size();
@@ -78,14 +87,31 @@ void UnionFindParallelCoarse::processOperations(const std::vector<Operation>& op
         // These assertions run within each thread before potentially calling find/unionSets.
         assert(op.a >= 0 && op.a < num_elements && "Operation element 'a' out of bounds.");
 
-        if (op.type == OperationType::UNION_OP) {
-            assert(op.b >= 0 && op.b < num_elements && "Operation element 'b' out of bounds for UNION_OP.");
-            // unionSets acquires the global lock, serializing the core work.
-            unionSets(op.a, op.b);
-            results[i] = -1; // Indicate union operation (no specific find result).
-        } else { // op.type == OperationType::FIND_OP
-            // find acquires the global lock, serializing the core work.
-            results[i] = find(op.a); // Store the result of the find operation.
+        switch (op.type) {
+            case OperationType::UNION_OP: {
+                assert(op.b >= 0 && op.b < num_elements && "Operation element 'b' out of bounds for UNION_OP.");
+                // Calls the fine-grained unionSets
+                bool union_occurred = unionSets(op.a, op.b);
+                results[i] = union_occurred ? 1 : 0; // Store 1 if union happened, 0 otherwise.
+                break;
+            }
+            case OperationType::FIND_OP: {
+                // Calls the fine-grained find
+                results[i] = find(op.a); // Store the result of the find operation (root).
+                break;
+            }
+            case OperationType::SAMESET_OP: {
+                assert(op.b >= 0 && op.b < num_elements && "Operation element 'b' out of bounds for SAMESET_OP.");
+                // Calls the fine-grained sameSet
+                bool are_same = sameSet(op.a, op.b);
+                results[i] = are_same ? 1 : 0; // Store 1 if they are in the same set, 0 otherwise.
+                break;
+            }
+            default:
+                // Optional: Handle unexpected operation type
+                assert(false && "Unknown operation type encountered.");
+                results[i] = -2; // Indicate an error or unexpected state
+                break;
         }
     }
 }

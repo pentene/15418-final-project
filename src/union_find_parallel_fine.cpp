@@ -160,7 +160,7 @@ void UnionFindParallelFine::processOperations(const std::vector<Operation>& ops,
                 results[i] = are_same ? 1 : 0; // Store 1 if they are in the same set, 0 otherwise.
                 break;
             }
-             default:
+            default:
                 // Optional: Handle unexpected operation type
                 assert(false && "Unknown operation type encountered.");
                 results[i] = -2; // Indicate an error or unexpected state
