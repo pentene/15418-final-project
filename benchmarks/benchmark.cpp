@@ -28,6 +28,9 @@
 #ifdef UNIONFIND_LOCKFREE_PLAIN_ENABLED // Include the new header
 #include "union_find_parallel_lockfree_plain_write.hpp"
 #endif
+#ifdef UNIONFIND_LOCKFREE_IPC_ENABLED // Include the new header
+#include "union_find_parallel_lockfree_ipc.hpp"
+#endif
 
 // Use the Operation struct and OperationType defined within the canonical UnionFind class.
 using CanonicalOperation = UnionFind::Operation;
@@ -135,7 +138,7 @@ TargetOp convert_operation(const SourceOp& source_op) {
 int main(int argc, char* argv[]) {
     if (argc < 4) {
         std::cerr << "Usage: " << argv[0] << " <implementation_type> <operations_file> <num_runs> [num_threads]" << std::endl;
-        std::cerr << "  implementation_type: serial, coarse, fine, lockfree, lockfree_plain" << std::endl;
+        std::cerr << "  implementation_type: serial, coarse, fine, lockfree, lockfree_plain, lockfree_ipc" << std::endl;
         std::cerr << "  operations_file: Path to the file containing operations (Type: 0=UNION, 1=FIND, 2=SAMESET)." << std::endl;
         std::cerr << "  num_runs: Number of times to run processOperations for timing." << std::endl;
         std::cerr << "  num_threads (optional): Number of threads for parallel versions (default: max available)." << std::endl;
@@ -283,6 +286,12 @@ int main(int argc, char* argv[]) {
             run_benchmark(uf_proto);
         }
         #endif
+        #ifdef UNIONFIND_LOCKFREE_IPC_ENABLED // New implementation
+        else if (impl_type == "lockfree_ipc") {
+            UnionFindParallelLockFreeIPC uf_proto(n_elements);
+            run_benchmark(uf_proto);
+        }
+        #endif
         else {
             std::cerr << "Error: Unknown implementation type '" << impl_type << "'." << std::endl;
             std::cerr << "Supported types: serial";
@@ -297,6 +306,9 @@ int main(int argc, char* argv[]) {
             #endif
             #ifdef UNIONFIND_LOCKFREE_PLAIN_ENABLED // New implementation
             std::cerr << ", lockfree_plain";
+            #endif
+            #ifdef UNIONFIND_LOCKFREE_IPC_ENABLED // New implementation
+            std::cerr << ", lockfree_ipc";
             #endif
             std::cerr << std::endl;
             return 1;

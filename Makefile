@@ -13,6 +13,7 @@ COARSE          ?= 1 # Enable Coarse-grained locking version
 FINE            ?= 1 # Enable Fine-grained locking version
 LOCKFREE        ?= 1 # Enable original Lock-free version (CAS path compression)
 LOCKFREE_PLAIN  ?= 1 # Enable Lock-free version with Plain Write path compaction
+LOCKFREE_IPC	?= 1 # Enable Lock-free version with IPC (immediate parent check)
 THREAD_COUNT    ?= 8 # Default thread count for parallel tests/benchmarks
 
 
@@ -52,6 +53,11 @@ ifeq ($(strip $(LOCKFREE_PLAIN)),1)
     ANY_LOCKFREE := 1
     SRC_FILES += src/union_find_parallel_lockfree_plain_write.cpp
     CXXFLAGS += -DUNIONFIND_LOCKFREE_PLAIN_ENABLED=1
+endif
+ifeq ($(strip $(LOCKFREE_IPC)),1)
+	ANY_LOCKFREE := 1
+	SRC_FILES += src/union_find_parallel_lockfree_ipc.cpp
+	CXXFLAGS += -DUNIONFIND_LOCKFREE_IPC_ENABLED=1
 endif
 
 # Add flags/libs needed for lockfree implementations

@@ -26,6 +26,9 @@
 #ifdef UNIONFIND_LOCKFREE_PLAIN_ENABLED // Include the new header
 #include "union_find_parallel_lockfree_plain_write.hpp"
 #endif
+#ifdef UNIONFIND_LOCKFREE_IPC_ENABLED // Include the new header
+#include "union_find_parallel_lockfree_ipc.hpp"
+#endif
 
 // Use the canonical Operation type from the serial version for loading
 // ASSUMPTION: UnionFind::OperationType includes SAMESET_OP
@@ -65,7 +68,6 @@ bool load_operations_for_test(const std::string& filename, int& n_elements, std:
     // static_assert(static_cast<int>(CanonicalOperationType::FIND_OP) == FIND_TYPE_VAL, "FIND_OP enum value mismatch");
     // static_assert(static_cast<int>(CanonicalOperationType::SAMESET_OP) == SAMESET_TYPE_VAL, "SAMESET_OP enum value mismatch");
 
-
     for (size_t i = 0; i < n_ops_in_file; ++i) {
         if (!(infile >> type_val >> a >> b)) {
             std::cerr << "Test Error: Failed to read operation " << i + 1 << " from file." << std::endl;
@@ -94,7 +96,7 @@ bool load_operations_for_test(const std::string& filename, int& n_elements, std:
             // 'b' is ignored for FIND, no specific validation needed for it here.
         } else if (type_val == SAMESET_TYPE_VAL) {
             op.type = CanonicalOperationType::SAMESET_OP;
-             if (b < 0 || b >= n_elements) {
+            if (b < 0 || b >= n_elements) {
                 std::cerr << "Test Error: Invalid element 'b' (" << b << ") for SAMESET_OP at line " << i + 2 << " in file " << filename << std::endl;
                 valid_op = false;
             }
@@ -104,7 +106,7 @@ bool load_operations_for_test(const std::string& filename, int& n_elements, std:
         }
 
         if (!valid_op) {
-             ops.clear(); return false;
+            ops.clear(); return false;
         }
 
         ops.push_back(op);
@@ -141,11 +143,10 @@ bool run_correctness_test(const std::string& impl_name, int n_elements, const st
         std::cerr << "Test Error: No operations available for testing " << impl_name << " with " << n_elements << " elements." << std::endl;
         return false;
     }
-     if (canonical_ops.empty() && n_elements <= 0) {
-         std::cout << "Test Info: No operations and no elements. Skipping test for " << impl_name << "." << std::endl;
-         return true; // Nothing to test, considered passing.
-     }
-
+    if (canonical_ops.empty() && n_elements <= 0) {
+        std::cout << "Test Info: No operations and no elements. Skipping test for " << impl_name << "." << std::endl;
+        return true; // Nothing to test, considered passing.
+    }
 
     // 1. Run Serial Implementation (Baseline)
     UnionFind uf_serial(n_elements);
@@ -155,7 +156,6 @@ bool run_correctness_test(const std::string& impl_name, int n_elements, const st
     // Execute all operations (UNION, FIND, SAMESET)
     uf_serial.processOperations(canonical_ops, serial_op_results);
     std::cout << "Serial baseline complete. Processed " << canonical_ops.size() << " operations." << std::endl;
-
 
     // 2. Prepare Operations for Parallel Version
     using ParallelOperation = typename ParallelUF::Operation;
@@ -222,7 +222,7 @@ bool run_correctness_test(const std::string& impl_name, int n_elements, const st
     } else {
         std::cout << "Result: FAIL - Found " << conn_mismatches << " final connectivity mismatches." << std::endl;
         if (conn_mismatches > report_limit_conn) {
-             std::cerr << " (Further mismatch details suppressed)" << std::endl;
+            std::cerr << " (Further mismatch details suppressed)" << std::endl;
         }
     }
     std::cout << "--- Test Complete: " << impl_name << " ---" << std::endl;
@@ -301,6 +301,14 @@ int main() {
         tests_run++;
         // Pass the full list of operations (including SAMESET)
         if (!run_correctness_test<UnionFindParallelLockFreePlainWrite>("Lock-Free Plain Write", n_elements, operations)) {
+            all_tests_passed = false;
+        }
+    #endif
+
+    #ifdef UNIONFIND_LOCKFREE_IPC_ENABLED
+        tests_run++;
+        // Pass the full list of operations (including SAMESET)
+        if (!run_correctness_test<UnionFindParallelLockFreeIPC>("Lock-Free IPC", n_elements, operations)) {
             all_tests_passed = false;
         }
     #endif
