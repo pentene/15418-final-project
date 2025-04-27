@@ -22,7 +22,6 @@ THREAD_COUNT    ?= 8 # Default thread count for parallel tests/benchmarks
 
 # Start with base source file (assuming a non-parallel base exists or is needed)
 # If no base serial implementation, remove this line or adjust as needed.
-# SRC_FILES := src/union_find_serial.cpp # Example if you have a serial base
 
 # Initialize SRC_FILES (start empty if no base serial)
 SRC_FILES := src/union_find.cpp 

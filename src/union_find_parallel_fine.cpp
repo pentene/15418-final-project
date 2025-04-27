@@ -24,14 +24,14 @@ int UnionFindParallelFine::find(int a) {
     // 1. Find the root (potentially racing with writes)
     int root = a;
     while (parent[root] != root) {
-         // Reading parent[root] might see intermediate states from concurrent unions.
-         // Check bounds defensively if necessary, although parent values should stay within [0, n-1].
-         int next_parent = parent[root];
-         // Simple cycle check or infinite loop prevention (optional, depends on guarantees)
-         // if (next_parent == root) break; // Should not happen if union logic is correct
-         root = next_parent;
-         // Add a check to ensure root index stays valid, though theoretically it should.
-         assert(root >= 0 && root < num_elements && "Invalid parent index encountered during find.");
+        // Reading parent[root] might see intermediate states from concurrent unions.
+        // Check bounds defensively if necessary, although parent values should stay within [0, n-1].
+        int next_parent = parent[root];
+        // Simple cycle check or infinite loop prevention (optional, depends on guarantees)
+        // if (next_parent == root) break; // Should not happen if union logic is correct
+        root = next_parent;
+        // Add a check to ensure root index stays valid, though theoretically it should.
+        assert(root >= 0 && root < num_elements && "Invalid parent index encountered during find.");
     }
 
     // 2. Path compression (potentially racy writes)
@@ -48,13 +48,13 @@ int UnionFindParallelFine::find(int a) {
 // Helper function: Finds the root without performing path compression.
 // Used inside unionSets critical section where locks are already held.
 int UnionFindParallelFine::find_root_no_compression(int a) const {
-     assert(a >= 0 && a < num_elements && "Element index out of bounds in find_root_no_compression().");
-     int current = a;
-     while (parent[current] != current) {
+    assert(a >= 0 && a < num_elements && "Element index out of bounds in find_root_no_compression().");
+    int current = a;
+    while (parent[current] != current) {
         current = parent[current];
         assert(current >= 0 && current < num_elements && "Invalid parent index encountered during find_root_no_compression.");
-     }
-     return current;
+    }
+    return current;
 }
 
 
@@ -154,17 +154,17 @@ void UnionFindParallelFine::processOperations(const std::vector<Operation>& ops,
                 break;
             }
             case OperationType::SAMESET_OP: {
-                 assert(op.b >= 0 && op.b < num_elements && "Operation element 'b' out of bounds for SAMESET_OP.");
+                assert(op.b >= 0 && op.b < num_elements && "Operation element 'b' out of bounds for SAMESET_OP.");
                 // Calls the fine-grained sameSet
                 bool are_same = sameSet(op.a, op.b);
                 results[i] = are_same ? 1 : 0; // Store 1 if they are in the same set, 0 otherwise.
                 break;
             }
              default:
-                 // Optional: Handle unexpected operation type
-                 assert(false && "Unknown operation type encountered.");
-                 results[i] = -2; // Indicate an error or unexpected state
-                 break;
+                // Optional: Handle unexpected operation type
+                assert(false && "Unknown operation type encountered.");
+                results[i] = -2; // Indicate an error or unexpected state
+                break;
         }
     }
 }

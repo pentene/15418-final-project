@@ -135,7 +135,7 @@ TargetOp convert_operation(const SourceOp& source_op) {
 int main(int argc, char* argv[]) {
     if (argc < 4) {
         std::cerr << "Usage: " << argv[0] << " <implementation_type> <operations_file> <num_runs> [num_threads]" << std::endl;
-        std::cerr << "  implementation_type: serial, coarse, fine, lockfree" << std::endl;
+        std::cerr << "  implementation_type: serial, coarse, fine, lockfree, lockfree_plain" << std::endl;
         std::cerr << "  operations_file: Path to the file containing operations (Type: 0=UNION, 1=FIND, 2=SAMESET)." << std::endl;
         std::cerr << "  num_runs: Number of times to run processOperations for timing." << std::endl;
         std::cerr << "  num_threads (optional): Number of threads for parallel versions (default: max available)." << std::endl;
@@ -277,6 +277,12 @@ int main(int argc, char* argv[]) {
             run_benchmark(uf_proto);
         }
         #endif
+        #ifdef UNIONFIND_LOCKFREE_PLAIN_ENABLED // New implementation
+        else if (impl_type == "lockfree_plain") {
+            UnionFindParallelLockFreePlainWrite uf_proto(n_elements);
+            run_benchmark(uf_proto);
+        }
+        #endif
         else {
             std::cerr << "Error: Unknown implementation type '" << impl_type << "'." << std::endl;
             std::cerr << "Supported types: serial";
@@ -289,15 +295,18 @@ int main(int argc, char* argv[]) {
             #ifdef UNIONFIND_LOCKFREE_ENABLED
             std::cerr << ", lockfree";
             #endif
+            #ifdef UNIONFIND_LOCKFREE_PLAIN_ENABLED // New implementation
+            std::cerr << ", lockfree_plain";
+            #endif
             std::cerr << std::endl;
             return 1;
         }
     } catch (const std::exception& e) {
-         std::cerr << "An exception occurred during benchmarking: " << e.what() << std::endl;
-         return 1;
+        std::cerr << "An exception occurred during benchmarking: " << e.what() << std::endl;
+        return 1;
     } catch (...) {
-         std::cerr << "An unknown exception occurred during benchmarking." << std::endl;
-         return 1;
+        std::cerr << "An unknown exception occurred during benchmarking." << std::endl;
+        return 1;
     }
 
 

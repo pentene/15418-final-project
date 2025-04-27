@@ -140,7 +140,7 @@ bool UnionFindParallelLockFree::unionSets(int a, int b) {
             if (root_a_idx < root_b_idx) {
                 // Line 10: if u < v && CAS(&A[u], u_val, v) : ... (u=root_a, v=root_b)
                 // Attempt to link root_a to root_b
-                 if (A[root_a_idx].compare_exchange_weak(root_a_val, root_b_idx,
+                if (A[root_a_idx].compare_exchange_weak(root_a_val, root_b_idx,
                                                         std::memory_order_release, std::memory_order_relaxed)) {
                     // Line 11: CAS(&A[v], rv_val, rv_val + 1) ; return (v=root_b)
                     // Attempt to increment rank of root_b (the new parent)
@@ -149,8 +149,8 @@ bool UnionFindParallelLockFree::unionSets(int a, int b) {
                                                         std::memory_order_release, std::memory_order_relaxed);
                     // Return true even if rank update fails, link succeeded.
                     return true;
-                 }
-                 // If CAS fails, loop again (state changed)
+                }
+                // If CAS fails, loop again (state changed)
 
             } else { // root_b_idx < root_a_idx
                  // Line 12: if u > v && CAS(&A[v], v_val, u) : ... (u=root_a, v=root_b)
@@ -226,21 +226,21 @@ void UnionFindParallelLockFree::processOperations(const std::vector<Operation>& 
                 bool success = unionSets(op.a, op.b);
                 results[i] = success ? 1 : 0;
             } else if (op.type == OperationType::SAMESET_OP) {
-                 bool same = sameSet(op.a, op.b);
-                 results[i] = same ? 1 : 0;
+                bool same = sameSet(op.a, op.b);
+                results[i] = same ? 1 : 0;
             }
         } catch (const std::out_of_range& e) {
             #pragma omp critical
             {
-                 std::cerr << "Error processing operation " << i << ": " << e.what() << std::endl;
+                std::cerr << "Error processing operation " << i << ": " << e.what() << std::endl;
             }
             results[i] = -1; // Indicate error
         } catch (const std::exception& e) {
              #pragma omp critical
             {
-                 std::cerr << "Generic error processing operation " << i << ": " << e.what() << std::endl;
+                std::cerr << "Generic error processing operation " << i << ": " << e.what() << std::endl;
             }
-             results[i] = -2; // Indicate error
+            results[i] = -2; // Indicate error
         }
     }
 }

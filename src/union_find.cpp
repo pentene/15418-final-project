@@ -85,16 +85,16 @@ void UnionFind::processOperations(const std::vector<Operation>& ops, std::vector
                 break;
             }
             case OperationType::SAMESET_OP: {
-                 assert(op.b >= 0 && op.b < num_elements && "Operation element 'b' out of bounds for SAMESET_OP.");
+                assert(op.b >= 0 && op.b < num_elements && "Operation element 'b' out of bounds for SAMESET_OP.");
                 bool are_same = sameSet(op.a, op.b);
                 results[i] = are_same ? 1 : 0; // Store 1 if they are in the same set, 0 otherwise.
                 break;
             }
              default:
-                 // Should not happen if input validation is correct
-                 assert(false && "Unknown operation type encountered.");
-                 results[i] = -2; // Indicate an error or unexpected state
-                 break;
+                // Should not happen if input validation is correct
+                assert(false && "Unknown operation type encountered.");
+                results[i] = -2; // Indicate an error or unexpected state
+                break;
         }
     }
 }
