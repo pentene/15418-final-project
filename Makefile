@@ -5,26 +5,33 @@
 # Compiler and flags
 CXX         := g++
 # Use -O3 for release builds, consider -g for debugging
-CXXFLAGS := -std=c++20 -O3 -g -Wall -Wextra -Iinclude -fopenmp -Wno-unknown-pragmas 
+# Added -pthread for potential std::thread usage if needed, though OpenMP is primary
+CXXFLAGS_BASE := -std=c++20 -O3 -g -Wall -Wextra -Iinclude -fopenmp -pthread -Wno-unknown-pragmas
 
 # User configurable options (can be overridden from command line, e.g., make FINE=1)
-COARSE      ?= 1
-FINE        ?= 1 # Set default to 1 if fine is implemented
-LOCKFREE    ?= 1 # Set default to 1 if lockfree is implemented
-THREAD_COUNT ?= 8 # Default thread count for parallel tests/benchmarks
+COARSE          ?= 1 # Enable Coarse-grained locking version
+FINE            ?= 1 # Enable Fine-grained locking version
+LOCKFREE        ?= 1 # Enable original Lock-free version (CAS path compression)
+LOCKFREE_PLAIN  ?= 1 # Enable Lock-free version with Plain Write path compaction
+THREAD_COUNT    ?= 8 # Default thread count for parallel tests/benchmarks
 
 
 ###############################################################################
 # Source Files & Object Files Determination
 ###############################################################################
 
-# Start with base source file
-SRC_FILES := src/union_find.cpp
+# Start with base source file (assuming a non-parallel base exists or is needed)
+# If no base serial implementation, remove this line or adjust as needed.
+# SRC_FILES := src/union_find_serial.cpp # Example if you have a serial base
 
-# Base CXXFLAGS (before conditional flags)
-# CXXFLAGS := $(CXXFLAGS_BASE) # If you had separate base flags
+# Initialize SRC_FILES (start empty if no base serial)
+SRC_FILES := src/union_find.cpp 
 
-# Conditionally add parallel source files AND corresponding flags
+# Initialize CXXFLAGS with base flags
+CXXFLAGS := $(CXXFLAGS_BASE)
+
+# --- Conditionally add implementations ---
+
 ifeq ($(strip $(COARSE)),1)
     SRC_FILES += src/union_find_parallel_coarse.cpp
     CXXFLAGS += -DUNIONFIND_COARSE_ENABLED=1
@@ -35,17 +42,35 @@ ifeq ($(strip $(FINE)),1)
     CXXFLAGS += -DUNIONFIND_FINE_ENABLED=1
 endif
 
+# Check if *any* lockfree version is enabled for common flags/libs
+ANY_LOCKFREE := 0
 ifeq ($(strip $(LOCKFREE)),1)
+    ANY_LOCKFREE := 1
     SRC_FILES += src/union_find_parallel_lockfree.cpp
     CXXFLAGS += -DUNIONFIND_LOCKFREE_ENABLED=1
-    # Add -mcx16 flag if using GCC/Clang on x86-64 to ensure CMPXCHG16B is available/expected
-    CXXFLAGS += -mcx16
+endif
+ifeq ($(strip $(LOCKFREE_PLAIN)),1)
+    ANY_LOCKFREE := 1
+    SRC_FILES += src/union_find_parallel_lockfree_plain_write.cpp
+    CXXFLAGS += -DUNIONFIND_LOCKFREE_PLAIN_ENABLED=1
 endif
 
-# Now, *after* SRC_FILES is fully determined, define OBJ_FILES
+# Add flags/libs needed for lockfree implementations
+ifeq ($(strip $(ANY_LOCKFREE)),1)
+    # Add -mcx16 flag if using GCC/Clang on x86-64 for CMPXCHG16B support
+    # Check your architecture/compiler if needed. Assumed x86-64 GCC/Clang here.
+    CXXFLAGS += -mcx16
+    # Linker flag needed for atomic operations library
+    LDFLAGS_ATOMIC := -latomic
+else
+    LDFLAGS_ATOMIC :=
+endif
+
+
+# Now, *after* SRC_FILES is fully determined, define OBJ_FILES for the library
 OBJ_FILES := $(SRC_FILES:.cpp=.o)
 
-# Add other flags AFTER conditional ones if needed, or keep them at the top
+# Add other flags AFTER conditional ones if needed
 CXXFLAGS += -DUNIONFIND_DEFAULT_THREADS=$(THREAD_COUNT)
 
 # Library output name
@@ -75,7 +100,7 @@ BENCHMARK_BIN := benchmark
 ###############################################################################
 
 # Define targets that don't correspond to files
-.PHONY: all clean test run_tests
+.PHONY: all clean test run_tests benchmark run_benchmark
 
 # Build all targets: library, test executables, and benchmark executable.
 all: $(LIB_NAME) $(TEST_SERIAL_BIN) $(TEST_PARALLEL_BIN) $(BENCHMARK_BIN)
@@ -87,7 +112,7 @@ test: $(TEST_SERIAL_BIN) $(TEST_PARALLEL_BIN)
 	@./$(TEST_SERIAL_BIN)
 	@echo ""
 	@echo "Running parallel correctness test..."
-	@./$(TEST_PARALLEL_BIN)
+	@./$(TEST_PARALLEL_BIN) $(THREAD_COUNT) # Pass thread count if test uses it
 
 # Target to explicitly run tests without necessarily rebuilding (if already built).
 # Useful if you just want to re-run.
@@ -96,7 +121,15 @@ run_tests:
 	@./$(TEST_SERIAL_BIN)
 	@echo ""
 	@echo "Running parallel correctness test..."
-	@./$(TEST_PARALLEL_BIN)
+	@./$(TEST_PARALLEL_BIN) $(THREAD_COUNT) # Pass thread count if test uses it
+
+# Build the benchmark executable
+benchmark: $(BENCHMARK_BIN)
+
+# Build and run the benchmark executable
+run_benchmark: $(BENCHMARK_BIN)
+	@echo "Running benchmark with $(THREAD_COUNT) threads..."
+	@./$(BENCHMARK_BIN) $(THREAD_COUNT) # Pass thread count if benchmark uses it
 
 # Clean up generated files.
 clean:
@@ -118,7 +151,7 @@ $(LIB_NAME): $(OBJ_FILES)
 # Pattern Rule for Object Files (compiles .cpp files into .o files)
 ###############################################################################
 
-# This rule applies to any .cpp file in src/, tests/, or benchmarks/
+# This rule applies to any .cpp file found as a prerequisite.
 # Output .o files will be placed in the same directory as the .cpp file.
 %.o: %.cpp
 	@echo "Compiling $< ..."
@@ -129,26 +162,25 @@ $(LIB_NAME): $(OBJ_FILES)
 # Linking Test Executables
 ###############################################################################
 
+# Link serial test (usually doesn't need OpenMP or atomic, but include CXXFLAGS for consistency)
 $(TEST_SERIAL_BIN): $(TEST_SERIAL_SRC) $(LIB_NAME)
 	@echo "Linking $@ ..."
 # IMPORTANT: The next line MUST start with a Tab character, not spaces.
-	$(CXX) $(CXXFLAGS) $(TEST_SERIAL_SRC) -o $(TEST_SERIAL_BIN) -L. -lunionfind -fopenmp
+	$(CXX) $(CXXFLAGS) $(TEST_SERIAL_SRC) -o $(TEST_SERIAL_BIN) -L. -lunionfind
 
+# Link parallel test (needs OpenMP, and atomic if any lockfree enabled)
 $(TEST_PARALLEL_BIN): $(TEST_PARALLEL_SRC) $(LIB_NAME)
 	@echo "Linking $@ ..."
 # IMPORTANT: The next line MUST start with a Tab character, not spaces.
-	# Add -latomic if lockfree implementation is enabled and might be tested
-	$(CXX) $(CXXFLAGS) $(TEST_PARALLEL_SRC) -o $(TEST_PARALLEL_BIN) -L. -lunionfind -fopenmp $(if $(filter 1,$(LOCKFREE)),-latomic)
+	$(CXX) $(CXXFLAGS) $(TEST_PARALLEL_SRC) -o $(TEST_PARALLEL_BIN) -L. -lunionfind -fopenmp $(LDFLAGS_ATOMIC)
 
 ###############################################################################
 # Linking Benchmark Executable
 ###############################################################################
 
-# Rule to link the benchmark executable (target name is 'benchmark')
+# Link the benchmark executable (needs OpenMP, and atomic if any lockfree enabled)
 $(BENCHMARK_BIN): $(BENCHMARK_SRC) $(LIB_NAME)
 	@echo "Linking $@ ..."
 # IMPORTANT: The next line MUST start with a Tab character, not spaces.
-	# Ensure benchmark links with OpenMP flags if it uses OpenMP directly
-	# Add -latomic explicitly since the benchmark needs to link lockfree code
-	$(CXX) $(CXXFLAGS) $(BENCHMARK_SRC) -o $(BENCHMARK_BIN) -L. -lunionfind -fopenmp -latomic
+	$(CXX) $(CXXFLAGS) $(BENCHMARK_SRC) -o $(BENCHMARK_BIN) -L. -lunionfind -fopenmp $(LDFLAGS_ATOMIC)
 

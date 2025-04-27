@@ -25,6 +25,9 @@
 #ifdef UNIONFIND_LOCKFREE_ENABLED
 #include "union_find_parallel_lockfree.hpp"
 #endif
+#ifdef UNIONFIND_LOCKFREE_PLAIN_ENABLED // Include the new header
+#include "union_find_parallel_lockfree_plain_write.hpp"
+#endif
 
 // Use the Operation struct and OperationType defined within the canonical UnionFind class.
 using CanonicalOperation = UnionFind::Operation;
@@ -46,13 +49,13 @@ bool load_operations(const std::string& filename, int& n_elements, std::vector<C
 
     size_t n_ops;
     if (!(infile >> n_elements >> n_ops)) {
-         std::cerr << "Error: Could not read number of elements and operations from file: " << filename << std::endl;
-         return false;
+        std::cerr << "Error: Could not read number of elements and operations from file: " << filename << std::endl;
+        return false;
     }
-     if (n_elements <= 0) {
-         std::cerr << "Error: Invalid number of elements read from file: " << n_elements << std::endl;
-         return false;
-     }
+    if (n_elements <= 0) {
+        std::cerr << "Error: Invalid number of elements read from file: " << n_elements << std::endl;
+        return false;
+    }
 
     ops.clear(); // Clear any previous content
     ops.reserve(n_ops);
@@ -68,23 +71,23 @@ bool load_operations(const std::string& filename, int& n_elements, std::vector<C
         // --- Validation ---
         // 1. Check valid type value
         if (type_val < 0 || type_val > 2) { // Now allowing 0, 1, 2
-             std::cerr << "Error: Invalid operation type at line " << i + 2 << ": type=" << type_val << " (must be 0, 1, or 2)" << std::endl;
-             ops.clear();
-             return false;
+            std::cerr << "Error: Invalid operation type at line " << i + 2 << ": type=" << type_val << " (must be 0, 1, or 2)" << std::endl;
+            ops.clear();
+            return false;
         }
         // 2. Check index 'a' bounds (required for all ops)
         if (a < 0 || a >= n_elements) {
-             std::cerr << "Error: Invalid index 'a' at line " << i + 2 << ": a=" << a << " (n_elements=" << n_elements << ")" << std::endl;
-             ops.clear();
-             return false;
+            std::cerr << "Error: Invalid index 'a' at line " << i + 2 << ": a=" << a << " (n_elements=" << n_elements << ")" << std::endl;
+            ops.clear();
+            return false;
         }
         // 3. Check index 'b' bounds (required for UNION and SAMESET)
         if (type_val == 0 || type_val == 2) { // UNION or SAMESET
-             if (b < 0 || b >= n_elements) {
-                 std::cerr << "Error: Invalid index 'b' for UNION/SAMESET op at line " << i + 2 << ": b=" << b << " (n_elements=" << n_elements << ")" << std::endl;
-                 ops.clear();
-                 return false;
-             }
+            if (b < 0 || b >= n_elements) {
+                std::cerr << "Error: Invalid index 'b' for UNION/SAMESET op at line " << i + 2 << ": b=" << b << " (n_elements=" << n_elements << ")" << std::endl;
+                ops.clear();
+                return false;
+            }
         }
         // --- End Validation ---
 
@@ -105,8 +108,8 @@ bool load_operations(const std::string& filename, int& n_elements, std::vector<C
     }
 
     if (ops.size() != n_ops) {
-         std::cerr << "Warning: Expected " << n_ops << " operations, but read " << ops.size() << "." << std::endl;
-         // Decide if this is a fatal error or just a warning
+        std::cerr << "Warning: Expected " << n_ops << " operations, but read " << ops.size() << "." << std::endl;
+        // Decide if this is a fatal error or just a warning
     }
 
     std::cout << "Successfully loaded " << ops.size() << " operations (UNION=0, FIND=1, SAMESET=2) for "
@@ -153,8 +156,8 @@ int main(int argc, char* argv[]) {
     }
 
     if (num_runs <= 0) {
-         std::cerr << "Error: Number of runs must be positive." << std::endl;
-         return 1;
+        std::cerr << "Error: Number of runs must be positive." << std::endl;
+        return 1;
     }
 
 
