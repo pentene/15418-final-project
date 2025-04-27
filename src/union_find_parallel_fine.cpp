@@ -133,7 +133,7 @@ void UnionFindParallelFine::processOperations(const std::vector<Operation>& ops,
     size_t nOps = ops.size();
     results.resize(nOps); // Ensure the results vector has the correct size.
 
-    #pragma omp parallel for schedule(dynamic)
+    #pragma omp parallel for schedule(static)
     for (int i = 0; i < static_cast<int>(nOps); ++i) {
         const auto& op = ops[i];
 

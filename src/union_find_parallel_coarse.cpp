@@ -79,7 +79,7 @@ void UnionFindParallelCoarse::processOperations(const std::vector<Operation>& op
     // Each thread will execute some iterations of the loop.
     // The schedule(dynamic) clause can help balance load if operations take variable time,
     // though with coarse locking, contention might be the bigger factor.
-    #pragma omp parallel for schedule(dynamic)
+    #pragma omp parallel for schedule(static)
     for (int i = 0; i < static_cast<int>(nOps); ++i) { // Use int for loop variable as common practice with OpenMP
         const auto& op = ops[i]; // Use a const reference for readability.
 
