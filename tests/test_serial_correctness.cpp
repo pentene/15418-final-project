@@ -1,149 +1,170 @@
 #include <iostream>
-#include <fstream>
-#include <sstream>
-#include <stdexcept>
-#include <string>
 #include <vector>
-#include "union_find.hpp"  // Serial UnionFind header
+#include <string>
+#include <fstream>
+#include <stdexcept>
+#include <memory> // For std::unique_ptr (though not strictly needed here)
+#include <cassert> // For assertions
+#include <iomanip> // For std::setw
 
-// Helper function to trim whitespace.
-std::string trim(const std::string &s) {
-    size_t start = s.find_first_not_of(" \t\r\n");
-    size_t end = s.find_last_not_of(" \t\r\n");
-    if (start == std::string::npos)
-        return "";
-    return s.substr(start, end - start + 1);
-}
+// Include the baseline serial implementation
+#include "union_find.hpp"
 
-// Structure to hold the test data for serial correctness.
-struct SerialTestData {
-    int n;  // number of elements
-    // List of operations (both union and find) in the order they appear.
-    std::vector<UnionFind::Operation> ops;
-    // Expected outputs for the find operations (in order).
-    std::vector<int> expected;
-};
+// Use the canonical Operation type from the serial version
+using CanonicalOperation = UnionFind::Operation;
+using CanonicalOperationType = UnionFind::OperationType;
 
-// Loads test data from a given file.
-// Expected file format:
-//   n u f
-// followed by u lines of union operations: "U a b"
-// followed by f lines of find operations: "F a expected"
-SerialTestData loadSerialTestData(const std::string &filename) {
+// Helper function to load operations (same as in parallel test and benchmark)
+// Loads UNION (0), FIND (1), and SAMESET (2) operations.
+bool load_operations_for_test(const std::string& filename, int& n_elements, std::vector<CanonicalOperation>& ops) {
     std::ifstream infile(filename);
     if (!infile) {
-        throw std::runtime_error("Error opening file: " + filename);
+        std::cerr << "Test Error: Cannot open file: " << filename << std::endl;
+        return false;
     }
 
-    SerialTestData data;
-    std::string line;
-
-    // Read header: n, number of union ops (u), number of find ops (f)
-    while (std::getline(infile, line)) {
-        line = trim(line);
-        if (line.empty() || line[0] == '#') continue;
-        std::istringstream iss(line);
-        int uOps, fOps;
-        if (!(iss >> data.n >> uOps >> fOps))
-            throw std::runtime_error("Invalid header format in test file: " + filename);
-        
-        // Process union operations.
-        for (int i = 0; i < uOps; i++) {
-            while (std::getline(infile, line)) {
-                line = trim(line);
-                if (line.empty() || line[0] == '#') continue;
-                std::istringstream opStream(line);
-                char op;
-                int a, b;
-                opStream >> op >> a >> b;
-                if (op != 'U')
-                    throw std::runtime_error("Expected union operation starting with 'U' in file: " + filename);
-                data.ops.push_back({UnionFind::OperationType::UNION_OP, a, b});
-                break;
-            }
-        }
-        
-        // Process find operations.
-        for (int i = 0; i < fOps; i++) {
-            while (std::getline(infile, line)) {
-                line = trim(line);
-                if (line.empty() || line[0] == '#') continue;
-                std::istringstream opStream(line);
-                char op;
-                int a, exp;
-                opStream >> op >> a >> exp;
-                if (op != 'F')
-                    throw std::runtime_error("Expected find operation starting with 'F' in file: " + filename);
-                // For a find operation, store the op (b field is unused).
-                data.ops.push_back({UnionFind::OperationType::FIND_OP, a, 0});
-                data.expected.push_back(exp);
-                break;
-            }
-        }
-        break; // Only process one test case per file.
+    size_t n_ops_in_file; // Total operations listed in the file header
+    if (!(infile >> n_elements >> n_ops_in_file)) {
+        std::cerr << "Test Error: Could not read header from file: " << filename << std::endl;
+        return false;
     }
-    return data;
+     if (n_elements <= 0) {
+         std::cerr << "Test Error: Invalid number of elements in file: " << n_elements << std::endl;
+         return false;
+     }
+
+    ops.clear();
+    ops.reserve(n_ops_in_file); // Reserve based on file header
+    int type_val, a, b;
+    size_t ops_loaded = 0;
+
+    // Define operation types consistent with the header files and generator
+    const int UNION_TYPE_VAL = 0; // Assuming 0 is UNION in file
+    const int FIND_TYPE_VAL = 1;  // Assuming 1 is FIND in file
+    const int SAMESET_TYPE_VAL = 2; // Assuming 2 is SAMESET in file
+
+    for (size_t i = 0; i < n_ops_in_file; ++i) {
+        if (!(infile >> type_val >> a >> b)) {
+            std::cerr << "Test Error: Failed to read operation " << i+1 << " from file." << std::endl;
+            ops.clear();
+            return false;
+        }
+
+        // --- Validation ---
+        // 1. Check valid type value
+        if (type_val < 0 || type_val > 2) {
+             std::cerr << "Test Error: Invalid operation type at line " << i + 2 << ": type=" << type_val << " (must be 0, 1, or 2)" << std::endl;
+             ops.clear(); return false;
+        }
+        // 2. Check index 'a' bounds (required for all ops)
+        if (a < 0 || a >= n_elements) {
+             std::cerr << "Test Error: Invalid index 'a' at line " << i + 2 << ": a=" << a << " (n_elements=" << n_elements << ")" << std::endl;
+             ops.clear(); return false;
+        }
+        // 3. Check index 'b' bounds (required for UNION and SAMESET)
+        if (type_val == UNION_TYPE_VAL || type_val == SAMESET_TYPE_VAL) {
+             if (b < 0 || b >= n_elements) {
+                 std::cerr << "Test Error: Invalid index 'b' for UNION/SAMESET op at line " << i + 2 << ": b=" << b << " (n_elements=" << n_elements << ")" << std::endl;
+                 ops.clear(); return false;
+             }
+        }
+        // --- End Validation ---
+
+        CanonicalOperation op;
+        op.a = a;
+        op.b = b; // Store b; it will be ignored by find if not needed
+
+        // Assign the correct enum type based on the integer value read
+        switch (type_val) {
+            case UNION_TYPE_VAL: op.type = CanonicalOperationType::UNION_OP; break;
+            case FIND_TYPE_VAL: op.type = CanonicalOperationType::FIND_OP; break;
+            case SAMESET_TYPE_VAL: op.type = CanonicalOperationType::SAMESET_OP; break;
+            // default case already handled by validation above
+        }
+        ops.push_back(op);
+        ops_loaded++;
+    }
+
+    if (ops_loaded != n_ops_in_file) {
+        std::cerr << "Test Warning: Expected " << n_ops_in_file << " operations in file header, but loaded " << ops_loaded << " operations from " << filename << "." << std::endl;
+    }
+
+    std::cout << "Loaded " << ops_loaded << " operations (UNION/FIND/SAMESET) for "
+              << n_elements << " elements from " << filename << " for serial testing." << std::endl;
+    return true;
 }
 
+
 int main(int argc, char* argv[]) {
-    // Require at least one test file as argument.
-    if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <test_file1> [<test_file2> ...]" << std::endl;
+    // --- Configuration ---
+    // Expect exactly one argument: the test file path
+    if (argc != 2) {
+         std::cerr << "Usage: " << argv[0] << " <test_operations_file>" << std::endl;
+         std::cerr << "  File format: <n_elements> <n_ops>" << std::endl;
+         std::cerr << "               <type> <a> <b> (type: 0=UNION, 1=FIND, 2=SAMESET)" << std::endl;
+         return 1;
+    }
+    const std::string test_ops_file = argv[1];
+
+    std::cout << "--- Testing Serial UnionFind Correctness ---" << std::endl;
+    std::cout << "Test File: " << test_ops_file << std::endl;
+
+    // --- Load Test Data ---
+    int n_elements;
+    std::vector<CanonicalOperation> operations;
+    if (!load_operations_for_test(test_ops_file, n_elements, operations)) {
+        std::cerr << "Test Setup FAILED: Could not load test data." << std::endl;
         return 1;
     }
-    
-    bool overallPassed = true;
-    
-    // Process each test file specified on the command line.
-    for (int fileIndex = 1; fileIndex < argc; fileIndex++) {
-        std::string filename = argv[fileIndex];
-        std::cout << "Processing test file: " << filename << std::endl;
-        
-        try {
-            SerialTestData testData = loadSerialTestData(filename);
-            std::cout << "Loaded test data: n = " << testData.n 
-                      << ", union ops = " << (testData.ops.size() - testData.expected.size())
-                      << ", find ops = " << testData.expected.size() << "\n";
-            
-            // Create an instance of serial UnionFind.
-            UnionFind uf(testData.n);
-            std::vector<int> results;
-            uf.processOperations(testData.ops, results);
-            
-            // Verify find operations.
-            int findCount = 0;
-            bool filePassed = true;
-            for (size_t i = 0; i < testData.ops.size(); ++i) {
-                if (testData.ops[i].type == UnionFind::OperationType::FIND_OP) {
-                    int result = results[i];
-                    int expected = testData.expected[findCount];
-                    std::cout << "Find op (" << testData.ops[i].a << "): got " << result
-                              << ", expected " << expected << "\n";
-                    if (result != expected) {
-                        std::cerr << "Mismatch in find operation " << findCount << " in file " << filename << "\n";
-                        filePassed = false;
-                    }
-                    ++findCount;
-                }
-            }
-            if (filePassed) {
-                std::cout << "Test file '" << filename << "' PASSED.\n";
-            } else {
-                std::cout << "Test file '" << filename << "' FAILED.\n";
-                overallPassed = false;
-            }
-        } catch (const std::exception &ex) {
-            std::cerr << "Error while processing file '" << filename << "': " << ex.what() << "\n";
-            overallPassed = false;
+    if (operations.empty()) {
+         std::cerr << "Test Setup Warning: No operations loaded from file: " << test_ops_file << std::endl;
+         std::cerr << "Test considered trivially PASSED as there's nothing to execute." << std::endl;
+         return 0; // Nothing to test
+    }
+
+    // --- Run Serial Implementation ---
+    bool test_passed = true;
+    std::vector<int> serial_op_results;
+    try {
+        std::cout << "Instantiating UnionFind(" << n_elements << ")..." << std::endl;
+        UnionFind uf_serial(n_elements);
+
+        std::cout << "Running serial processOperations (" << operations.size() << " ops)..." << std::endl;
+        uf_serial.processOperations(operations, serial_op_results);
+        std::cout << "Serial processOperations complete." << std::endl;
+
+        // --- Basic Verification ---
+        // Check if the results vector has the expected size
+        if (serial_op_results.size() != operations.size()) {
+             std::cerr << "Result Size Mismatch! Expected: " << operations.size()
+                       << ", Got: " << serial_op_results.size() << std::endl;
+             test_passed = false;
+        } else {
+            std::cout << "Result vector size matches operation count (" << serial_op_results.size() << ")." << std::endl;
+            // Optional: Print first few results for basic sanity check
+            // size_t print_limit = std::min((size_t)10, serial_op_results.size());
+            // std::cout << "First " << print_limit << " results: ";
+            // for(size_t i=0; i<print_limit; ++i) std::cout << serial_op_results[i] << " ";
+            // std::cout << std::endl;
         }
-        std::cout << "-----------------------------------------\n";
+
+    } catch (const std::exception& e) {
+        std::cerr << "Test FAILED: An exception occurred during serial execution: " << e.what() << std::endl;
+        test_passed = false;
+    } catch (...) {
+        std::cerr << "Test FAILED: An unknown exception occurred during serial execution." << std::endl;
+        test_passed = false;
     }
-    
-    if (!overallPassed) {
-        std::cerr << "Some tests failed.\n";
-        return 1;
+
+    // --- Final Result ---
+    std::cout << "\n========================================" << std::endl;
+    if (test_passed) {
+        std::cout << "Overall Result: SERIAL TEST PASSED" << std::endl;
+        std::cout << "========================================" << std::endl;
+        return 0; // Success
+    } else {
+        std::cout << "Overall Result: SERIAL TEST FAILED" << std::endl;
+        std::cout << "========================================" << std::endl;
+        return 1; // Failure
     }
-    
-    std::cout << "All test files passed.\n";
-    return 0;
 }

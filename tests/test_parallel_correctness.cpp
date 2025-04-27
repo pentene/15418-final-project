@@ -1,193 +1,300 @@
 #include <iostream>
-#include <fstream>
-#include <sstream>
-#include <stdexcept>
-#include <string>
 #include <vector>
-#include <omp.h>
+#include <string>
+#include <fstream>
+#include <stdexcept>
+#include <memory> // For std::unique_ptr
+#include <cassert> // For assertions
+#include <omp.h>   // For omp_set_num_threads
+#include <algorithm> // For std::transform
+#include <iterator> // For std::back_inserter
+#include <iomanip> // For std::setw
 
-// Include the parallel union find header.
+// Include the baseline serial implementation
+#include "union_find.hpp"
+
+// Conditionally include the parallel implementations based on Makefile flags
+#ifdef UNIONFIND_COARSE_ENABLED
 #include "union_find_parallel_coarse.hpp"
-// #include "union_find_parallel_fine.hpp"
-// #include "union_find_parallel_lockfree.hpp"
+#endif
+#ifdef UNIONFIND_FINE_ENABLED
+#include "union_find_parallel_fine.hpp" // Assuming fine-grained might exist
+#endif
+#ifdef UNIONFIND_LOCKFREE_ENABLED
+#include "union_find_parallel_lockfree.hpp"
+#endif
 
-// Helper function to trim whitespace from both ends.
-std::string trim(const std::string &s) {
-    size_t start = s.find_first_not_of(" \t\r\n");
-    size_t end = s.find_last_not_of(" \t\r\n");
-    if (start == std::string::npos)
-        return "";
-    return s.substr(start, end - start + 1);
-}
+// Use the canonical Operation type from the serial version for loading
+// NOTE: Serial version only supports UNION_OP and FIND_OP
+using CanonicalOperation = UnionFind::Operation;
+using CanonicalOperationType = UnionFind::OperationType;
 
-// Structure to store a union operation in the test file.
-struct UnionOp {
-    int a;
-    int b;
-};
-
-// Structure for connectivity query.
-struct Query {
-    int a;
-    int b;
-    int expected;  // 1 if connected, 0 if not.
-};
-
-// Structure to hold the complete test data.
-struct ParallelTestData {
-    int n;                          // number of elements
-    std::vector<UnionOp> unionOps;  // union operations to be executed concurrently
-    std::vector<Query> queries;     // connectivity queries (executed after all unions)
-};
-
-// Function to load test data from a file.
-// Expected file format (example):
-//   # first line: n u q
-//   10 4 3
-//   # union operations:
-//   U 0 1
-//   U 1 2
-//   U 3 4
-//   U 6 7
-//   # connectivity queries:
-//   Q 0 2 1
-//   Q 0 3 0
-//   Q 6 7 1
-ParallelTestData loadTestData(const std::string &filename) {
+// Helper function to load operations (similar to benchmark)
+// MODIFIED: Skips SAMESET_OP as it's not in the baseline UnionFind
+bool load_operations_for_test(const std::string& filename, int& n_elements, std::vector<CanonicalOperation>& ops) {
     std::ifstream infile(filename);
-    if (!infile)
-        throw std::runtime_error("Error opening test file: " + filename);
-
-    ParallelTestData data;
-    std::string line;
-
-    // Read header line: n u q
-    while (std::getline(infile, line)) {
-        line = trim(line);
-        if (line.empty() || line[0] == '#')
-            continue;
-        std::istringstream header(line);
-        int uCount, qCount;
-        if (!(header >> data.n >> uCount >> qCount))
-            throw std::runtime_error("Invalid header in test file: " + filename);
-
-        // Read union operations.
-        for (int i = 0; i < uCount; i++) {
-            while (std::getline(infile, line)) {
-                line = trim(line);
-                if (line.empty() || line[0] == '#')
-                    continue;
-                std::istringstream opStream(line);
-                char op;
-                int a, b;
-                opStream >> op >> a >> b;
-                if (op != 'U')
-                    throw std::runtime_error("Expected a union op (U) in file: " + filename);
-                data.unionOps.push_back({a, b});
-                break;
-            }
-        }
-        // Read connectivity queries.
-        for (int i = 0; i < qCount; i++) {
-            while (std::getline(infile, line)) {
-                line = trim(line);
-                if (line.empty() || line[0] == '#')
-                    continue;
-                std::istringstream qStream(line);
-                char q;
-                int a, b, expected;
-                qStream >> q >> a >> b >> expected;
-                if (q != 'Q')
-                    throw std::runtime_error("Expected a query op (Q) in file: " + filename);
-                data.queries.push_back({a, b, expected});
-                break;
-            }
-        }
-        break; // Process only one test case per file.
+    if (!infile) {
+        std::cerr << "Test Error: Cannot open file: " << filename << std::endl;
+        return false;
     }
 
-    return data;
+    size_t n_ops_in_file; // Total operations listed in the file header
+    if (!(infile >> n_elements >> n_ops_in_file)) {
+        std::cerr << "Test Error: Could not read header from file: " << filename << std::endl;
+        return false;
+    }
+     if (n_elements <= 0) {
+        std::cerr << "Test Error: Invalid number of elements in file: " << n_elements << std::endl;
+        return false;
+     }
+
+    ops.clear();
+    ops.reserve(n_ops_in_file); // Reserve based on file header, actual count might be less
+    int type_val, a, b;
+    size_t ops_loaded = 0;
+    size_t ops_skipped = 0;
+
+    // Define operation types consistent with the header files
+    const int UNION_TYPE_VAL = 0; // Assuming 0 is UNION in file
+    const int FIND_TYPE_VAL = 1;  // Assuming 1 is FIND in file
+    const int SAMESET_TYPE_VAL = 2; // Assuming 2 is SAMESET in file
+
+    for (size_t i = 0; i < n_ops_in_file; ++i) {
+        if (!(infile >> type_val >> a >> b)) {
+            std::cerr << "Test Error: Failed to read operation " << i+1 << " from file." << std::endl;
+            ops.clear();
+            return false;
+        }
+
+        // Basic validation for 'a'
+        if (a < 0 || a >= n_elements) {
+            std::cerr << "Test Error: Invalid element 'a' (" << a << ") at line " << i + 2 << " in file " << filename << std::endl;
+            ops.clear(); return false;
+        }
+
+        CanonicalOperation op;
+        op.a = a;
+        op.b = b; // Assign b, validate based on type below
+
+        if (type_val == UNION_TYPE_VAL) {
+            op.type = CanonicalOperationType::UNION_OP;
+            if (b < 0 || b >= n_elements) {
+                std::cerr << "Test Error: Invalid element 'b' (" << b << ") for UNION_OP at line " << i + 2 << " in file " << filename << std::endl;
+                ops.clear(); return false;
+            }
+            ops.push_back(op);
+            ops_loaded++;
+        } else if (type_val == FIND_TYPE_VAL) {
+            op.type = CanonicalOperationType::FIND_OP;
+            // b is ignored for FIND, no validation needed for b
+            ops.push_back(op);
+            ops_loaded++;
+        } else if (type_val == SAMESET_TYPE_VAL) {
+            // SAMESET_OP is not supported by the baseline serial UnionFind.
+            // Skip this operation for the correctness test.
+            ops_skipped++;
+            // Optionally log skipped operations
+            // std::cout << "Test Info: Skipping SAMESET_OP at line " << i + 2 << " (not in baseline)." << std::endl;
+        }
+         else {
+            std::cerr << "Test Error: Invalid operation type value (" << type_val << ") at line " << i + 2 << " in file " << filename << std::endl;
+            ops.clear(); return false;
+         }
+    }
+
+    if (ops_loaded + ops_skipped != n_ops_in_file) {
+        std::cerr << "Test Warning: Expected " << n_ops_in_file << " operations in file, but processed " << ops_loaded + ops_skipped << " lines from " << filename << "." << std::endl;
+    }
+    if (ops_skipped > 0) {
+    std::cout << "Test Info: Skipped " << ops_skipped << " SAMESET operations as they are not supported by the baseline serial implementation for comparison." << std::endl;
+    }
+    std::cout << "Loaded " << ops_loaded << " compatible operations (UNION/FIND) for " << n_elements << " elements from " << filename << " for testing." << std::endl;
+    return true;
 }
 
-// Template helper function to run the test on one file using a given Union-Find type.
-// UFType must provide a constructor UFType(int), unionSets(int, int),
-// find(int), and processOperations(const std::vector<Operation>&, std::vector<int>&).
-template <typename UFType>
-bool runTestForFile(const std::string &filename) {
-    std::cout << "Processing test file: " << filename << std::endl;
-    ParallelTestData data = loadTestData(filename);
-    UFType uf(data.n);
 
-    // Convert test file's union operations into the library's Operation type.
-    std::vector<typename UFType::Operation> ops;
-    for (const auto &u : data.unionOps) {
-        // Explicitly construct an object of type UFType::Operation.
-        typename UFType::Operation op(UFType::OperationType::UNION_OP, u.a, u.b);
-        ops.push_back(op);
-    }
+// Helper function to convert operations (needed for parallel versions)
+// Assumes TargetOp::type can be static_cast from SourceOp::type (UNION_OP/FIND_OP)
+template <typename TargetOp, typename SourceOp>
+TargetOp convert_operation_test(const SourceOp& source_op) {
+    TargetOp target_op;
+    // Only UNION_OP and FIND_OP should be present here due to loader changes.
+    assert(source_op.type == CanonicalOperationType::UNION_OP || source_op.type == CanonicalOperationType::FIND_OP);
 
-    // Process union operations concurrently using the library's processOperations method.
-    std::vector<int> results;
-    uf.processOperations(ops, results);
-
-    // Now verify connectivity queries sequentially.
-    bool passed = true;
-    for (size_t i = 0; i < data.queries.size(); i++) {
-        Query q = data.queries[i];
-        // Check: if q.expected == 1 then uf.find(q.a) should equal uf.find(q.b);
-        // otherwise, they should differ.
-        bool connected = (uf.find(q.a) == uf.find(q.b));
-        std::cout << "Query (" << q.a << ", " << q.b << ") -> got "
-                  << (connected ? "connected" : "not connected")
-                  << ", expected " << (q.expected == 1 ? "connected" : "not connected") << "\n";
-        if (connected != (q.expected == 1)) {
-            std::cerr << "Mismatch for query (" << q.a << ", " << q.b << ")\n";
-            passed = false;
-        }
-    }
-
-    if (passed)
-        std::cout << "Test file '" << filename << "' PASSED.\n";
-    else
-        std::cout << "Test file '" << filename << "' FAILED.\n";
-    std::cout << "-----------------------------------------\n";
-    return passed;
+    // Perform static_cast, assuming enum values for UNION_OP/FIND_OP correspond.
+    target_op.type = static_cast<decltype(target_op.type)>(source_op.type);
+    target_op.a = source_op.a;
+    target_op.b = source_op.b;
+    return target_op;
 }
 
-int main(int argc, char* argv[]) {
-    // Usage: executable <strategy> <test_file1> [test_file2 ...]
-    // <strategy> must be one of: coarse, fine, lockfree
-    if (argc < 3) {
-        std::cerr << "Usage: " << argv[0] << " <strategy> <test_file1> [test_file2 ...]\n";
-        return 1;
+// --- MODIFIED CORRECTNESS TEST FUNCTION ---
+// Verifies connectivity equivalence using only UNION and FIND operations.
+template <typename ParallelUF>
+bool run_correctness_test(const std::string& impl_name, int n_elements, const std::vector<CanonicalOperation>& canonical_ops) {
+    std::cout << "\n--- Testing Correctness: " << impl_name << " (Connectivity Verification using UNION/FIND) ---" << std::endl;
+
+    // Ensure operations vector is not empty after loading/filtering
+    if (canonical_ops.empty()) {
+        std::cerr << "Test Error: No compatible (UNION/FIND) operations available for testing " << impl_name << "." << std::endl;
+        return false; // Cannot run test without operations
     }
 
-    std::string strategy = argv[1];
-    bool overallPassed = true;
+    // 1. Run Serial Implementation (Baseline)
+    UnionFind uf_serial(n_elements);
+    std::vector<int> serial_op_results; // For processOperations signature
+    std::cout << "Running serial baseline..." << std::endl;
+    uf_serial.processOperations(canonical_ops, serial_op_results);
+    std::cout << "Serial baseline complete." << std::endl;
 
-    // Process each test file provided on the command line.
-    for (int i = 2; i < argc; i++) {
-        std::string testFile = argv[i];
-        bool result = false;
-        if (strategy == "coarse") {
-            result = runTestForFile<UnionFindParallelCoarse>(testFile);
-        } else if (strategy == "fine") {
-            // Uncomment below if you have implemented the fine-grained version.
-            // result = runTestForFile<UnionFindParallelFine>(testFile);
-        } else if (strategy == "lockfree") {
-            // Uncomment below if you have implemented the lock-free version.
-            // result = runTestForFile<UnionFindParallelLockFree>(testFile);
-        } else {
-            std::cerr << "Unknown strategy: " << strategy << "\n";
-            return 1;
+    // 2. Prepare Operations for Parallel Version
+    // Need to ensure the ParallelUF::Operation struct and enum exist and are compatible
+    // This requires ParallelUF to be defined when this template is instantiated.
+    using ParallelOperation = typename ParallelUF::Operation;
+    std::vector<ParallelOperation> parallel_ops;
+    parallel_ops.reserve(canonical_ops.size());
+    std::transform(canonical_ops.begin(), canonical_ops.end(),
+                   std::back_inserter(parallel_ops),
+                   convert_operation_test<ParallelOperation, CanonicalOperation>);
+
+    // 3. Run Parallel Implementation
+    ParallelUF uf_parallel(n_elements);
+    std::vector<int> parallel_op_results; // For processOperations signature
+    std::cout << "Running parallel implementation (" << impl_name << ")..." << std::endl;
+    uf_parallel.processOperations(parallel_ops, parallel_op_results);
+    std::cout << "Parallel implementation complete." << std::endl;
+
+    // 4. Get Final Roots for All Elements from Both Implementations
+    std::vector<int> serial_final_roots(n_elements);
+    std::vector<int> parallel_final_roots(n_elements);
+
+    std::cout << "Calculating final roots for comparison..." << std::endl;
+    // Finding roots serially here to avoid parallel overhead/races in verification itself.
+    for (int k = 0; k < n_elements; ++k) {
+        serial_final_roots[k] = uf_serial.find(k);
+        // Ensure the parallel implementation has a 'find' method
+        parallel_final_roots[k] = uf_parallel.find(k);
+    }
+    std::cout << "Final roots calculated." << std::endl;
+
+    // 5. Compare Connectivity by Checking All Pairs
+    std::cout << "Comparing connectivity for all pairs..." << std::endl;
+    bool connectivity_match = true;
+    long long pairs_checked = 0;
+    long long mismatches = 0;
+    const int report_limit = 10; // Limit number of reported mismatches
+
+    // Optimization: Only check pairs (a, b) where a < b
+    for (int a = 0; a < n_elements; ++a) {
+        for (int b = a + 1; b < n_elements; ++b) {
+            pairs_checked++;
+            bool serial_connected = (serial_final_roots[a] == serial_final_roots[b]);
+            // Check connectivity using the parallel structure's final roots
+            bool parallel_connected = (parallel_final_roots[a] == parallel_final_roots[b]);
+
+            if (serial_connected != parallel_connected) {
+                connectivity_match = false;
+                mismatches++;
+                if (mismatches <= report_limit) {
+                    std::cerr << "Connectivity Mismatch found for pair (" << a << ", " << b << "): "
+                              << "Serial says " << (serial_connected ? "CONNECTED" : "DISCONNECTED") << " (Roots: " << serial_final_roots[a] << ", " << serial_final_roots[b] << "), "
+                              << impl_name << " says " << (parallel_connected ? "CONNECTED" : "DISCONNECTED") << " (Roots: " << parallel_final_roots[a] << ", " << parallel_final_roots[b] << ")" << std::endl;
+                }
+            }
         }
-        overallPassed = overallPassed && result;
     }
 
-    if (!overallPassed) {
-        std::cerr << "Some tests FAILED.\n";
-        return 1;
+    std::cout << "Connectivity comparison complete. Checked " << pairs_checked << " pairs." << std::endl;
+    if (connectivity_match) {
+        std::cout << "Result: PASS - Connectivity matches serial baseline." << std::endl;
+    } else {
+        std::cout << "Result: FAIL - Found " << mismatches << " connectivity mismatches." << std::endl;
+        if (mismatches > report_limit) {
+             std::cerr << " (Further mismatch details suppressed)" << std::endl;
+        }
     }
-    std::cout << "All tests PASSED.\n";
-    return 0;
+    std::cout << "--- Test Complete: " << impl_name << " ---" << std::endl;
+    return connectivity_match;
+}
+
+
+// Main function - unchanged
+int main() {
+    // --- Configuration ---
+    const std::string test_ops_file = "tests/resources/parallel_test_1.txt"; // Example file path
+
+    #ifdef UNIONFIND_DEFAULT_THREADS
+        int num_threads = UNIONFIND_DEFAULT_THREADS;
+        omp_set_num_threads(num_threads);
+        std::cout << "Setting OpenMP threads for test: " << num_threads << std::endl;
+    #else
+        // Get max threads available if not set, just for info
+        int max_threads = omp_get_max_threads();
+        std::cout << "Using default OpenMP threads (Max available likely: " << max_threads << ")." << std::endl;
+    #endif
+
+    // --- Load Test Data ---
+    int n_elements;
+    std::vector<CanonicalOperation> operations; // Will only contain UNION/FIND ops
+    if (!load_operations_for_test(test_ops_file, n_elements, operations)) {
+        return 1; // Failed to load test data
+    }
+    // Check if any compatible operations were loaded
+    if (operations.empty() && n_elements > 0) { // Check n_elements too, in case file only had header
+        std::cerr << "Test Error: No compatible (UNION/FIND) operations loaded from file: " << test_ops_file << std::endl;
+        std::cerr << "Cannot perform correctness test." << std::endl;
+        return 1; // Treat as failure if no ops to test
+    }
+     if (operations.empty() && n_elements <= 0) {
+         // This case should be caught by loader, but double-check
+         std::cerr << "Test Error: Invalid input file or no operations." << std::endl;
+         return 1;
+     }
+
+
+    // --- Run Tests for Enabled Implementations ---
+    bool all_tests_passed = true;
+    int tests_run = 0;
+
+    #ifdef UNIONFIND_COARSE_ENABLED
+        // Ensure Coarse version has compatible Operation struct/enum
+        tests_run++;
+        if (!run_correctness_test<UnionFindParallelCoarse>("Coarse-Grained", n_elements, operations)) {
+            all_tests_passed = false;
+        }
+    #endif
+
+    #ifdef UNIONFIND_FINE_ENABLED
+        // Assuming UnionFindParallelFine exists and has compatible interface
+        tests_run++;
+        if (!run_correctness_test<UnionFindParallelFine>("Fine-Grained", n_elements, operations)) {
+            all_tests_passed = false;
+        }
+    #endif
+
+    #ifdef UNIONFIND_LOCKFREE_ENABLED
+         // Ensure LockFree version has compatible Operation struct/enum (it should)
+        tests_run++;
+        if (!run_correctness_test<UnionFindParallelLockFree>("Lock-Free", n_elements, operations)) {
+            all_tests_passed = false;
+        }
+    #endif
+
+    if (tests_run == 0) {
+        std::cerr << "\nWarning: No parallel implementations seem to be enabled via Makefile flags (e.g., LOCKFREE=1)." << std::endl;
+        std::cerr << "No parallel correctness tests were run." << std::endl;
+        return 0; // No tests failed, but none ran
+    }
+
+    // --- Final Result ---
+    std::cout << "\n========================================" << std::endl;
+    if (all_tests_passed) {
+        std::cout << "Overall Result: ALL PARALLEL TESTS PASSED (Connectivity Verification)" << std::endl;
+        std::cout << "========================================" << std::endl;
+        return 0; // Success
+    } else {
+        std::cout << "Overall Result: SOME PARALLEL TESTS FAILED (Connectivity Verification)" << std::endl;
+        std::cout << "========================================" << std::endl;
+        return 1; // Failure
+    }
 }

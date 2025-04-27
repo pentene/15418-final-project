@@ -3,23 +3,22 @@
 
 #include <vector>
 #include <cassert> // Include for assertions
+#include <numeric> // For std::iota in constructor
 
 // Serial Union-Find (Disjoint Set Union) Implementation with Path Compression
 // and Union by Rank. Includes basic input validation via assertions.
-// In addition to the traditional interface, we define an
-// Operation type and a function to process a list of operations.
+// Defines Operation types and a function to process a list of operations,
+// consistent with the parallel versions for benchmarking.
 class UnionFind {
 public:
     // Supported operation types.
-    enum class OperationType { UNION_OP, FIND_OP };
+    enum class OperationType { UNION_OP, FIND_OP, SAMESET_OP };
 
-    // Each operation is either a union (two elements to merge) or a find (one element).
-    // For union operations, both 'a' and 'b' are used.
-    // For find operations, only 'a' is used (the result of find(a) is returned).
+    // Operation structure consistent with parallel versions.
     struct Operation {
         OperationType type;
         int a;
-        int b; // For find operations this field is ignored.
+        int b; // Used for UNION_OP and SAMESET_OP, ignored for FIND_OP
     };
 
     // Constructs a UnionFind data structure with n elements (0 .. n-1).
@@ -35,15 +34,29 @@ public:
     // Precondition: 0 <= a < size(), 0 <= b < size()
     bool unionSets(int a, int b);
 
+    // Checks if elements 'a' and 'b' are in the same set.
+    // Precondition: 0 <= a < size(), 0 <= b < size()
+    bool sameSet(int a, int b);
+
     // Processes a list of operations sequentially.
-    // The results vector is resized to ops.size() and for each operation:
-    // - For UNION_OP, unionSets() is called and results[i] is set to -1.
-    // - For FIND_OP, find() is called and its result is stored at results[i].
-    // Precondition: For each op, 0 <= op.a < size(), and if op.type == UNION_OP, 0 <= op.b < size().
+    // The results vector is resized to ops.size() and populated as follows:
+    // - For FIND_OP: result is the root index found by find(op.a).
+    // - For UNION_OP: result is 1 if unionSets(op.a, op.b) returned true (union occurred), 0 otherwise.
+    // - For SAMESET_OP: result is 1 if sameSet(op.a, op.b) returned true, 0 otherwise.
+    // Precondition: For each op, 0 <= op.a < size(), and if op.type != FIND_OP, 0 <= op.b < size().
     void processOperations(const std::vector<Operation>& ops, std::vector<int>& results);
 
     // Returns the number of elements (n) the structure was initialized with.
     int size() const;
+
+    // Destructor (default is sufficient)
+    ~UnionFind() = default;
+
+    // Disable copy/move semantics (optional, but good practice if not needed)
+    UnionFind(const UnionFind&) = delete;
+    UnionFind& operator=(const UnionFind&) = delete;
+    UnionFind(UnionFind&&) = delete;
+    UnionFind& operator=(UnionFind&&) = delete;
 
 private:
     std::vector<int> parent;

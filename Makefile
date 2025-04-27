@@ -5,7 +5,7 @@
 # Compiler and flags
 CXX         := g++
 # Use -O3 for release builds, consider -g for debugging
-CXXFLAGS    := -std=c++20 -O3 -Wall -Wextra -Iinclude -fopenmp -Wno-unknown-pragmas
+CXXFLAGS := -std=c++20 -O3 -g -Wall -Wextra -Iinclude -fopenmp -Wno-unknown-pragmas 
 
 # User configurable options (can be overridden from command line, e.g., make FINE=1)
 COARSE      ?= 1
@@ -13,46 +13,40 @@ FINE        ?= 1 # Set default to 1 if fine is implemented
 LOCKFREE    ?= 1 # Set default to 1 if lockfree is implemented
 THREAD_COUNT ?= 8 # Default thread count for parallel tests/benchmarks
 
-# Add preprocessor definitions based on configuration
-ifeq ($(COARSE),1)
+
+###############################################################################
+# Source Files & Object Files Determination
+###############################################################################
+
+# Start with base source file
+SRC_FILES := src/union_find.cpp
+
+# Base CXXFLAGS (before conditional flags)
+# CXXFLAGS := $(CXXFLAGS_BASE) # If you had separate base flags
+
+# Conditionally add parallel source files AND corresponding flags
+ifeq ($(strip $(COARSE)),1)
+    SRC_FILES += src/union_find_parallel_coarse.cpp
     CXXFLAGS += -DUNIONFIND_COARSE_ENABLED=1
 endif
 
-ifeq ($(FINE),1)
+ifeq ($(strip $(FINE)),1)
+    SRC_FILES += src/union_find_parallel_fine.cpp
     CXXFLAGS += -DUNIONFIND_FINE_ENABLED=1
 endif
 
-ifeq ($(LOCKFREE),1)
+ifeq ($(strip $(LOCKFREE)),1)
+    SRC_FILES += src/union_find_parallel_lockfree.cpp
     CXXFLAGS += -DUNIONFIND_LOCKFREE_ENABLED=1
     # Add -mcx16 flag if using GCC/Clang on x86-64 to ensure CMPXCHG16B is available/expected
-    # This might not be strictly necessary with modern compilers but can help.
     CXXFLAGS += -mcx16
 endif
 
-# Pass default thread count (can be used by benchmark/test setup if needed)
-CXXFLAGS += -DUNIONFIND_DEFAULT_THREADS=$(THREAD_COUNT)
-
-###############################################################################
-# Source Files & Object Files
-###############################################################################
-
-# Source files for union-find library (serial and parallel implementations)
-SRC_FILES := src/union_find.cpp
-
-ifeq ($(COARSE),1)
-    SRC_FILES += src/union_find_parallel_coarse.cpp
-endif
-
-ifeq ($(FINE),1)
-    SRC_FILES += src/union_find_parallel_fine.cpp
-endif
-
-ifeq ($(LOCKFREE),1)
-    SRC_FILES += src/union_find_parallel_lockfree.cpp
-endif
-
-# Generate object file names from source files.
+# Now, *after* SRC_FILES is fully determined, define OBJ_FILES
 OBJ_FILES := $(SRC_FILES:.cpp=.o)
+
+# Add other flags AFTER conditional ones if needed, or keep them at the top
+CXXFLAGS += -DUNIONFIND_DEFAULT_THREADS=$(THREAD_COUNT)
 
 # Library output name
 LIB_NAME    := libunionfind.a
@@ -114,10 +108,11 @@ clean:
 # Library Target: Build static library
 ###############################################################################
 
+# Depends on ALL object files determined above
 $(LIB_NAME): $(OBJ_FILES)
 	@echo "Archiving $(LIB_NAME)..."
 # IMPORTANT: The next line MUST start with a Tab character, not spaces.
-	ar rcs $(LIB_NAME) $(OBJ_FILES)
+	ar rcs $(LIB_NAME) $(OBJ_FILES) # Use the final OBJ_FILES list
 
 ###############################################################################
 # Pattern Rule for Object Files (compiles .cpp files into .o files)
@@ -129,11 +124,6 @@ $(LIB_NAME): $(OBJ_FILES)
 	@echo "Compiling $< ..."
 # IMPORTANT: The next line MUST start with a Tab character, not spaces.
 	$(CXX) $(CXXFLAGS) -c $< -o $@
-
-# Note: The pattern rule above might place .o files alongside source files.
-# If you prefer all .o files in one place (e.g., an 'obj' directory),
-# the rules would need adjustment (e.g., using VPATH or more specific rules).
-# The current setup is simpler and often sufficient.
 
 ###############################################################################
 # Linking Test Executables

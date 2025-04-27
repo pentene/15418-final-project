@@ -1,204 +1,252 @@
 #include "union_find_parallel_lockfree.hpp"
-#include <omp.h>
-#include <vector>
-#include <atomic>
-#include <cstdint>
-#include <cassert>
-#include <stdexcept> // For potential exceptions if atomics are not lock-free
+#include <omp.h> // For OpenMP directives
+#include <stdexcept> // For range checks
+#include <iostream> // For potential debugging
+#include <utility> // For std::pair
 
-// Constructor
+// --- Constructor ---
+
 UnionFindParallelLockFree::UnionFindParallelLockFree(int n)
-    : nodes(n), num_elements(n) {
-    // Precondition: n should not be negative.
-    assert(n >= 0 && "Number of elements cannot be negative.");
-
-    // Check if the atomic<Node> is indeed lock-free (likely uses CMPXCHG16B)
-    // If this assertion fails, the platform/compiler doesn't support the required 128-bit atomics.
-    // Note: In C++20, std::atomic<T>::is_always_lock_free could be checked at compile time.
-    // For C++17 or earlier, we check at runtime.
-    std::atomic<Node> temp_node;
-    if (!temp_node.is_lock_free()) {
-        // Consider throwing or logging a fatal error if 128-bit atomics aren't supported
-        // throw std::runtime_error("128-bit atomic<Node> is not lock-free on this platform.");
-        // For now, assert:
-        assert(false && "std::atomic<Node> (128-bit) is not lock-free!");
+    : n_elements(n),
+      A(n) // Use fill constructor to default-construct n atomic<int> elements
+{
+    if (n < 0) {
+        // Use std::invalid_argument for constructor parameter issues
+        throw std::invalid_argument("Number of elements cannot be negative.");
     }
-
-
+    // Initialize each default-constructed atomic individually.
     for (int i = 0; i < n; ++i) {
-        // Initialize each node: parent is itself, rank is 0.
-        // Use .store() with memory_order_relaxed initially, as no other threads access yet.
-        nodes[i].store({ .parent = static_cast<std::int64_t>(i), .rank = 0 }, std::memory_order_relaxed);
+        // Initialize each element as a root with rank 0. Store rank 0 as value -1.
+        // Relaxed memory order is sufficient for initialization before parallel access.
+        A[i].store(make_root_val(0), std::memory_order_relaxed);
     }
 }
 
-// Lock-free find operation with path compression using CAS
+// --- Core Lock-Free Operations (Aligned with Pseudocode) ---
+
+// Internal find operation matching pseudocode structure (lines 16-23)
+// Returns {root_index, root_value} where root_value encodes rank if it's a root.
+// Performs path compression during recursion unwind.
+std::pair<int, int> UnionFindParallelLockFree::find_internal(int u) {
+    // Line 17: p = A[u]
+    int p_val = A[u].load(std::memory_order_acquire); // Read current parent index or root value
+
+    // Line 18: if isRank(p) : return (u, p)
+    if (is_root(p_val)) {
+        // Base case: u is the root. Return u and its value (which encodes rank).
+        return {u, p_val};
+    }
+
+    // Line 19: (root, rank_val) = Find(p)
+    // Recursive step: Find the root of the parent p_val (which is an index here).
+    int p_idx = p_val; // p_val must be an index if not a root
+    std::pair<int, int> root_info = find_internal(p_idx);
+    int root_idx = root_info.first;
+    // int root_val = root_info.second; // We have the root's value in root_info.second
+
+    // Lines 20-21: Path Compression: if p != root: CAS(&A[u], p, root)
+    // Attempt to update A[u] from p_idx to root_idx if they differ.
+    if (p_idx != root_idx) {
+        // Read A[u] again just before CAS to use the most recent value in the comparison.
+        // Use the value we originally read (p_val which equals p_idx here) as the expected value.
+        A[u].compare_exchange_weak(p_val, root_idx,
+                                    std::memory_order_release, // Make write visible if successful
+                                    std::memory_order_relaxed); // Relaxed on failure is fine
+        // We don't retry or loop here; if CAS fails, it means A[u] changed concurrently.
+        // The recursive structure ensures we still return the correct root found deeper.
+        // Subsequent finds involving 'u' will benefit if the compression succeeded.
+    }
+
+    // Line 22: return (root, rank_val)
+    // Return the root info found from the recursive call.
+    return root_info;
+}
+
+
+// Public find wrapper: Calls internal find and returns only the root index.
 int UnionFindParallelLockFree::find(int a) {
-    // Precondition: Element index 'a' must be within bounds.
-    assert(a >= 0 && a < num_elements && "Element index out of bounds in find().");
-
-    int current = a;
-    Node current_node;
-
-    // 1. Find the root
-    while (true) {
-        current_node = nodes[current].load(std::memory_order_acquire); // Read node info
-        if (current_node.parent == current) {
-            break; // Found the root
-        }
-        current = static_cast<int>(current_node.parent); // Move up
-        // Optional: Add yield/pause here if contention is extremely high
+     if (a < 0 || a >= n_elements) {
+        throw std::out_of_range("Element index out of range in find().");
     }
-    int root = current; // 'current' now holds the root index
-
-    // 2. Path compression: Make nodes on the path point directly to the root
-    current = a; // Start back at the original element
-    while (true) {
-         Node node_to_update = nodes[current].load(std::memory_order_acquire);
-         // If parent is already the root, or if 'current' is the root itself, stop compressing this path segment.
-         if (node_to_update.parent == root || current == root) {
-            break;
-         }
-
-         // Prepare the desired state: parent points to root, rank remains unchanged.
-         Node desired_node = { .parent = static_cast<std::int64_t>(root), .rank = node_to_update.rank };
-
-         // Attempt to atomically update the parent pointer using CAS.
-         // We use weak because it's okay if it fails spuriously; we'll just retry.
-         // memory_order_release on success ensures prior writes are visible,
-         // memory_order_acquire on failure ensures we re-read fresh state.
-         if (nodes[current].compare_exchange_weak(node_to_update, desired_node,
-                                                  std::memory_order_release,
-                                                  std::memory_order_acquire)) {
-            // Success! Move to the next node in the original path (before compression).
-            // We need the parent *before* we potentially updated it.
-            // However, the CAS only succeeded if node_to_update was the current value,
-            // so node_to_update.parent holds the next element up the original path.
-            current = static_cast<int>(node_to_update.parent);
-         } else {
-            // CAS failed, likely due to a concurrent update.
-            // The loop condition (node_to_update.parent == root) or the outer
-            // root finding loop will handle converging to the correct state eventually.
-            // We might need to re-read the root if the structure changed drastically.
-            // For simplicity here, we continue the compression attempt from the current 'current'.
-            // A more robust implementation might re-run the root finding part if CAS fails many times.
-            // Let's break this inner loop and return the root found initially.
-            // The next find() call will continue the compression.
-            break; // Exit compression loop for this element if CAS fails
-         }
-
-        // Safety break: If current somehow didn't change, exit to prevent infinite loop.
-        // This shouldn't happen with the logic above but is a safeguard.
-        // if (static_cast<int>(node_to_update.parent) == current) break;
-    }
-
-    return root;
+    // Call the internal recursive find and extract the root index.
+    // The internal call handles path compression.
+    return find_internal(a).first;
 }
 
 
-// Lock-free union operation using 128-bit CAS
+// Unites the sets containing elements 'a' and 'b' (lock-free)
+// Aligned with pseudocode lines 1-15
 bool UnionFindParallelLockFree::unionSets(int a, int b) {
-    // Precondition: Element indices 'a' and 'b' must be within bounds.
-    assert(a >= 0 && a < num_elements && "Element index 'a' out of bounds in unionSets().");
-    assert(b >= 0 && b < num_elements && "Element index 'b' out of bounds in unionSets().");
+    if (a < 0 || a >= n_elements || b < 0 || b >= n_elements) {
+        throw std::out_of_range("Element index out of range in unionSets().");
+    }
 
-    while (true) { // Loop until successful union or determined they are already joined.
-        int rootA_idx = find(a);
-        int rootB_idx = find(b);
+    // Line 1: while (true) { ... }
+    while (true) {
+        // Lines 2-3: Find roots and their values (which encode ranks)
+        std::pair<int, int> info_a = find_internal(a);
+        int root_a_idx = info_a.first;
+        int root_a_val = info_a.second; // This is the value at the root (encodes rank)
 
-        if (rootA_idx == rootB_idx) {
-            return false; // Already in the same set.
+        std::pair<int, int> info_b = find_internal(b);
+        int root_b_idx = info_b.first;
+        int root_b_val = info_b.second; // This is the value at the root (encodes rank)
+
+        // It's possible find_internal returned a node that is no longer a root
+        // due to concurrent unions. Reload the values directly from the atomic array
+        // to get the most current state *at the potential roots* before proceeding.
+        root_a_val = A[root_a_idx].load(std::memory_order_acquire);
+        root_b_val = A[root_b_idx].load(std::memory_order_acquire);
+
+        // Check if the nodes we identified as roots are *still* roots.
+        // If not, retry the whole operation.
+        if (!is_root(root_a_val)) {
+            continue; // State changed, retry find
+        }
+         if (!is_root(root_b_val)) {
+            continue; // State changed, retry find
         }
 
-        // Load the current state of the root nodes. Acquire semantics needed.
-        Node rootA_node = nodes[rootA_idx].load(std::memory_order_acquire);
-        Node rootB_node = nodes[rootB_idx].load(std::memory_order_acquire);
-
-        // Verify they are still roots. If not, another thread modified them; retry find.
-        // Need to check both parent pointers.
-        if (rootA_node.parent != rootA_idx || rootB_node.parent != rootB_idx) {
-            continue; // State changed concurrently, retry the whole operation.
+        // Line 4: if u == v : return (where u, v are roots in pseudocode)
+        if (root_a_idx == root_b_idx) {
+            return false; // Already in the same set
         }
 
-        // Determine which root becomes the new parent based on rank.
-        int child_idx, parent_idx;
-        Node child_node, parent_node;
+        // Get ranks from the root values
+        int rank_a = get_rank(root_a_val);
+        int rank_b = get_rank(root_b_val);
 
-        if (rootA_node.rank < rootB_node.rank) {
-            child_idx = rootA_idx; child_node = rootA_node;
-            parent_idx = rootB_idx; parent_node = rootB_node;
-        } else if (rootB_node.rank < rootA_node.rank) {
-            child_idx = rootB_idx; child_node = rootB_node;
-            parent_idx = rootA_idx; parent_node = rootA_node;
-        } else {
-            // Ranks are equal. Arbitrarily choose one, e.g., lower index becomes child.
-            // This helps prevent cycles in some edge cases, though path compression complicates guarantees.
-            if (rootA_idx < rootB_idx) {
-                 child_idx = rootA_idx; child_node = rootA_node;
-                 parent_idx = rootB_idx; parent_node = rootB_node;
-            } else {
-                 child_idx = rootB_idx; child_node = rootB_node;
-                 parent_idx = rootA_idx; parent_node = rootA_node;
+        // Lines 5-13: Compare ranks and attempt CAS
+        if (rank_a < rank_b) {
+            // Line 6: if CAS(&A[u], u_val, v) : return (u is root_a, v is root_b)
+            // Attempt to link root_a to root_b
+            if (A[root_a_idx].compare_exchange_weak(root_a_val, root_b_idx,
+                                                    std::memory_order_release, std::memory_order_relaxed)) {
+                return true; // Union successful
+            }
+            // If CAS fails, loop again (state changed)
+
+        } else if (rank_a > rank_b) {
+            // Line 8: if CAS(&A[v], v_val, u) : return (v is root_b, u is root_a)
+            // Attempt to link root_b to root_a
+            if (A[root_b_idx].compare_exchange_weak(root_b_val, root_a_idx,
+                                                    std::memory_order_release, std::memory_order_relaxed)) {
+                return true; // Union successful
+            }
+            // If CAS fails, loop again (state changed)
+
+        } else { // Lines 9-13: Ranks are equal (ru == rv)
+            // Use root index as tie-breaker (smaller index becomes parent)
+            if (root_a_idx < root_b_idx) {
+                // Line 10: if u < v && CAS(&A[u], u_val, v) : ... (u=root_a, v=root_b)
+                // Attempt to link root_a to root_b
+                 if (A[root_a_idx].compare_exchange_weak(root_a_val, root_b_idx,
+                                                        std::memory_order_release, std::memory_order_relaxed)) {
+                    // Line 11: CAS(&A[v], rv_val, rv_val + 1) ; return (v=root_b)
+                    // Attempt to increment rank of root_b (the new parent)
+                    int new_rank_b_val = make_root_val(rank_b + 1);
+                    A[root_b_idx].compare_exchange_weak(root_b_val, new_rank_b_val,
+                                                        std::memory_order_release, std::memory_order_relaxed);
+                    // Return true even if rank update fails, link succeeded.
+                    return true;
+                 }
+                 // If CAS fails, loop again (state changed)
+
+            } else { // root_b_idx < root_a_idx
+                 // Line 12: if u > v && CAS(&A[v], v_val, u) : ... (u=root_a, v=root_b)
+                 // Attempt to link root_b to root_a
+                 if (A[root_b_idx].compare_exchange_weak(root_b_val, root_a_idx,
+                                                        std::memory_order_release, std::memory_order_relaxed)) {
+                    // Line 13: CAS(&A[u], ru_val, ru_val + 1) ; return (u=root_a)
+                    // Attempt to increment rank of root_a (the new parent)
+                    int new_rank_a_val = make_root_val(rank_a + 1);
+                    A[root_a_idx].compare_exchange_weak(root_a_val, new_rank_a_val,
+                                                        std::memory_order_release, std::memory_order_relaxed);
+                    // Return true even if rank update fails, link succeeded.
+                    return true;
+                 }
+                 // If CAS fails, loop again (state changed)
             }
         }
-
-        // Attempt to link the child root to the parent root using 128-bit CAS.
-        // Expected state: child root still points to itself.
-        Node expected_child_node = child_node; // The state we read earlier
-        // Desired state: child root points to the parent root, rank remains the same.
-        Node desired_child_node = { .parent = static_cast<std::int64_t>(parent_idx), .rank = child_node.rank };
-
-        // CAS on the child node. Release semantics on success, Acquire on failure.
-        if (nodes[child_idx].compare_exchange_weak(expected_child_node, desired_child_node,
-                                                   std::memory_order_release,
-                                                   std::memory_order_acquire)) {
-            // Successfully linked child to parent!
-            // Now, if ranks were equal, attempt to increment the parent's rank.
-            if (rootA_node.rank == rootB_node.rank) {
-                // Expected state for parent: the state we read earlier (parent_node)
-                Node expected_parent_node = parent_node;
-                // Desired state: parent still points to itself, rank is incremented.
-                Node desired_parent_node = { .parent = static_cast<std::int64_t>(parent_idx), .rank = parent_node.rank + 1 };
-
-                // Attempt to CAS the parent node's rank.
-                // It's okay if this fails (e.g., another thread already incremented it
-                // or performed another union). The structure remains correct.
-                nodes[parent_idx].compare_exchange_weak(expected_parent_node, desired_parent_node,
-                                                        std::memory_order_release,
-                                                        std::memory_order_relaxed); // Relaxed on failure is okay here
-            }
-            return true; // Union successful.
-        }
-        // else: CAS failed. The state of child_idx changed concurrently.
-        // The outer loop will retry the entire operation (re-find roots, etc.).
+        // If any CAS failed, the while(true) loop ensures we retry the entire operation.
     }
 }
 
-// Process a batch of operations in parallel (lock-free)
+// Checks if elements 'a' and 'b' are in the same set (lock-free)
+// Aligned with pseudocode lines 25-30
+bool UnionFindParallelLockFree::sameSet(int a, int b) {
+     if (a < 0 || a >= n_elements || b < 0 || b >= n_elements) {
+        throw std::out_of_range("Element index out of range in sameSet().");
+    }
+
+    // Line 25: while (true) { ... }
+    while (true) {
+        // Line 26: (u, _) = Find(u) ; (v, _) = Find(v) (u,v are roots here)
+        int root_a_idx = find_internal(a).first; // Get root via internal find
+        int root_b_idx = find_internal(b).first; // Get root via internal find
+
+        // Line 27: if u == v : return true
+        if (root_a_idx == root_b_idx) {
+            return true; // Definitely in the same set
+        }
+
+        // Line 28: if isRank(A[u]) : // still a root? (u is root_a_idx)
+        // Check if the first root found is *still* a root. If not, the structure
+        // might have changed concurrently making the comparison potentially invalid.
+        int current_val_at_root_a = A[root_a_idx].load(std::memory_order_acquire);
+        if (is_root(current_val_at_root_a)) {
+            // Line 29: return false
+            // If roots were different, and root_a is confirmed to still be a root,
+            // they were not in the same set *at this moment*.
+            return false;
+        }
+
+        // Line 28 leads to retry if !isRank(A[u])
+        // If root_a is no longer a root, retry the whole operation.
+        continue;
+    }
+}
+
+
+// --- Parallel Processing ---
+// This function remains the same as it relies on the public API,
+// which now uses the pseudocode-aligned internal logic.
 void UnionFindParallelLockFree::processOperations(const std::vector<Operation>& ops, std::vector<int>& results) {
-    size_t nOps = ops.size();
-    results.resize(nOps); // Ensure the results vector has the correct size.
+    size_t num_ops = ops.size();
+    results.resize(num_ops); // Ensure results vector has the correct size
 
-    #pragma omp parallel for schedule(dynamic)
-    for (int i = 0; i < static_cast<int>(nOps); ++i) {
+    #pragma omp parallel for schedule(static)
+    for (size_t i = 0; i < num_ops; ++i) {
         const auto& op = ops[i];
-
-        // Precondition checks
-        assert(op.a >= 0 && op.a < num_elements && "Operation element 'a' out of bounds.");
-        if (op.type == OperationType::UNION_OP) {
-            assert(op.b >= 0 && op.b < num_elements && "Operation element 'b' out of bounds for UNION_OP.");
-            // Calls the lock-free unionSets
-            unionSets(op.a, op.b);
-            results[i] = -1;
-        } else { // op.type == OperationType::FIND_OP
-            // Calls the lock-free find
-            results[i] = find(op.a);
+        try {
+            if (op.type == OperationType::FIND_OP) {
+                // Public find still returns just the root index
+                results[i] = find(op.a);
+            } else if (op.type == OperationType::UNION_OP) {
+                bool success = unionSets(op.a, op.b);
+                results[i] = success ? 1 : 0;
+            } else if (op.type == OperationType::SAMESET_OP) {
+                 bool same = sameSet(op.a, op.b);
+                 results[i] = same ? 1 : 0;
+            }
+        } catch (const std::out_of_range& e) {
+            #pragma omp critical
+            {
+                 std::cerr << "Error processing operation " << i << ": " << e.what() << std::endl;
+            }
+            results[i] = -1; // Indicate error
+        } catch (const std::exception& e) {
+             #pragma omp critical
+            {
+                 std::cerr << "Generic error processing operation " << i << ": " << e.what() << std::endl;
+            }
+             results[i] = -2; // Indicate error
         }
     }
 }
 
-// Get the size (number of elements)
+// --- Utility ---
+
 int UnionFindParallelLockFree::size() const {
-    // No atomics needed as num_elements is immutable after construction.
-    return num_elements;
+    return n_elements;
 }

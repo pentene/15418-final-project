@@ -6,6 +6,24 @@
 #include <numeric> // For std::iota
 #include <cassert> // For assertions
 #include <algorithm> // For std::min/max
+#include <memory> // For potentially managing mutexes if needed (though vector often works)
+
+// Enum to define the type of operation
+enum class OperationType {
+    UNION_OP,
+    FIND_OP,
+    SAMESET_OP // Check if two elements are in the same set
+};
+
+// Structure to represent an operation
+struct Operation {
+    OperationType type;
+    int a;
+    int b; // Used for UNION_OP and SAMESET_OP
+};
+
+
+// --- Fine-Grained Lock Union-Find Class ---
 
 // Fine-Grained Lock Parallel Union-Find implementation using OpenMP.
 // Each element has its own mutex, primarily used to lock roots during union operations.
@@ -13,14 +31,18 @@
 // Union operations are carefully locked to ensure correctness.
 class UnionFindParallelFine {
 public:
-    // Supported operation types (consistent with other versions).
-    enum class OperationType { UNION_OP, FIND_OP };
 
-    // Operation structure (consistent with other versions).
+    enum class OperationType {
+        UNION_OP,
+        FIND_OP,
+        SAMESET_OP // Check if two elements are in the same set
+    };
+
+    // Structure to represent an operation
     struct Operation {
         OperationType type;
         int a;
-        int b; // For find operations this field is ignored.
+        int b; // Used for UNION_OP and SAMESET_OP
     };
 
     // Constructs a UnionFindParallelFine with n elements (0 .. n-1).
@@ -28,9 +50,7 @@ public:
     explicit UnionFindParallelFine(int n);
 
     // Finds the representative (root) of the set containing element 'a'.
-    // Performs path compression, but this part might race with concurrent unions
-    // without more complex locking during traversal. The root finding itself
-    // should be safe assuming unionSets locks correctly.
+    // Performs best-effort path compression (potentially racy).
     // Precondition: 0 <= a < size()
     int find(int a);
 
@@ -40,13 +60,34 @@ public:
     // Precondition: 0 <= a < size(), 0 <= b < size()
     bool unionSets(int a, int b);
 
+    // Checks if elements 'a' and 'b' are in the same set.
+    // Uses the potentially racy find operation. For higher consistency,
+    // a locking mechanism similar to unionSets could be used, but is omitted
+    // here for simplicity, matching the best-effort nature of find().
+    // Precondition: 0 <= a < size(), 0 <= b < size()
+    bool sameSet(int a, int b);
+
     // Processes a list of operations in parallel using OpenMP.
-    // Each thread calls the fine-grained find/unionSets methods.
-    // Precondition: For each op, 0 <= op.a < size(), and if op.type == UNION_OP, 0 <= op.b < size().
+    // Each thread calls the fine-grained find/unionSets/sameSet methods.
+    // The results vector is resized to ops.size() and populated as follows:
+    // - For FIND_OP: result is the root index found by find(op.a).
+    // - For UNION_OP: result is 1 if unionSets(op.a, op.b) returned true (union occurred), 0 otherwise.
+    // - For SAMESET_OP: result is 1 if sameSet(op.a, op.b) returned true, 0 otherwise.
+    // Precondition: For each op, 0 <= op.a < size(), and if op.type != FIND_OP, 0 <= op.b < size().
     void processOperations(const std::vector<Operation>& ops, std::vector<int>& results);
 
     // Returns the number of elements (n) the structure was initialized with.
     int size() const;
+
+    // Destructor (default is sufficient)
+    ~UnionFindParallelFine() = default;
+
+    // Disable copy and move semantics due to mutex members
+    UnionFindParallelFine(const UnionFindParallelFine&) = delete;
+    UnionFindParallelFine& operator=(const UnionFindParallelFine&) = delete;
+    UnionFindParallelFine(UnionFindParallelFine&&) = delete;
+    UnionFindParallelFine& operator=(UnionFindParallelFine&&) = delete;
+
 
 private:
     // Helper function for find without path compression, used during locked verification.
@@ -55,15 +96,8 @@ private:
     std::vector<int> parent;
     std::vector<int> rank;
     int num_elements;
-    // Use a vector of mutexes, one for each element.
-    // We primarily lock the mutexes corresponding to the roots.
-    // Using mutable allows locking in const methods like find_root_no_compression if needed,
-    // but here it's mainly for organization. std::mutex itself is not copyable/movable.
-    // We need a dynamically sized container of non-movable mutexes.
-    // A vector of unique_ptr<mutex> or a custom allocator might be needed,
-    // or simply accept that the vector won't be efficiently resizable after init.
-    // For simplicity here, we'll assume std::vector<std::mutex> works as needed post C++11
-    // (it's often implemented with non-movable internal storage).
+    // Vector of mutexes, one for each potential root.
+    // std::vector<std::mutex> works in C++11 and later for default construction.
     mutable std::vector<std::mutex> locks;
 };
 
