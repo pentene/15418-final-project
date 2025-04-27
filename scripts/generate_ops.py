@@ -53,7 +53,7 @@ def generate_operations(n_elements, n_operations, find_ratio, output_filename):
                     # (avoids trivial union(x, x))
                     b = random.randint(0, n_elements - 1)
                     while a == b and n_elements > 1: # Prevent infinite loop if n_elements is 1
-                         b = random.randint(0, n_elements - 1)
+                        b = random.randint(0, n_elements - 1)
                     union_count += 1
                 else:
                     # FIND operation (a already chosen, b is 0)

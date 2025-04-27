@@ -3,13 +3,14 @@
 #include <string>
 #include <fstream>
 #include <chrono>
-#include <numeric>
+#include <numeric>    // For std::accumulate
 #include <stdexcept>
-#include <memory> // For std::unique_ptr
-#include <iomanip> // For std::fixed, std::setprecision
-#include <omp.h>   // For omp_set_num_threads and omp_get_max_threads
-#include <algorithm>  // Added for std::min_element, std::max_element
-#include <cmath>      // Added for std::sqrt
+#include <memory>     // For std::unique_ptr
+#include <iomanip>    // For std::fixed, std::setprecision
+#include <omp.h>      // For omp_set_num_threads and omp_get_max_threads
+#include <algorithm>  // For std::min_element, std::max_element, std::transform
+#include <cmath>      // For std::sqrt
+#include <type_traits> // For std::remove_reference_t
 
 // Include your Union-Find implementations
 #include "union_find.hpp" // Serial - We'll use its Operation type as canonical
@@ -24,10 +25,9 @@
 #endif
 
 // Use the Operation struct and OperationType defined within the UnionFind class.
-// This assumes all implementations (coarse, fine, lockfree) have a compatible
-// nested Operation struct and OperationType enum, as intended by the design.
-using Operation = UnionFind::Operation;
-using OperationType = UnionFind::OperationType;
+// This is the "canonical" type we load data into.
+using CanonicalOperation = UnionFind::Operation;
+using CanonicalOperationType = UnionFind::OperationType;
 
 
 // Function to load operations from a file
@@ -35,8 +35,8 @@ using OperationType = UnionFind::OperationType;
 // <num_elements> <num_operations>
 // <type> <a> <b>  (type: 0 for UNION, 1 for FIND)
 // ...
-// Now uses std::vector<UnionFind::Operation>
-bool load_operations(const std::string& filename, int& n_elements, std::vector<Operation>& ops) {
+// Loads into std::vector<CanonicalOperation>
+bool load_operations(const std::string& filename, int& n_elements, std::vector<CanonicalOperation>& ops) {
     std::ifstream infile(filename);
     if (!infile) {
         std::cerr << "Error: Cannot open file: " << filename << std::endl;
@@ -45,12 +45,12 @@ bool load_operations(const std::string& filename, int& n_elements, std::vector<O
 
     size_t n_ops;
     if (!(infile >> n_elements >> n_ops)) {
-        std::cerr << "Error: Could not read number of elements and operations from file: " << filename << std::endl;
-        return false;
+         std::cerr << "Error: Could not read number of elements and operations from file: " << filename << std::endl;
+         return false;
     }
      if (n_elements <= 0) {
-        std::cerr << "Error: Invalid number of elements read from file: " << n_elements << std::endl;
-        return false;
+         std::cerr << "Error: Invalid number of elements read from file: " << n_elements << std::endl;
+         return false;
      }
 
     ops.clear(); // Clear any previous content
@@ -66,14 +66,14 @@ bool load_operations(const std::string& filename, int& n_elements, std::vector<O
         // Basic validation
         // Check element indices against n_elements read from file
         if ((type_val != 0 && type_val != 1) || a < 0 || a >= n_elements || b < 0 || (type_val == 0 && b >= n_elements)) {
-            std::cerr << "Error: Invalid operation data at line " << i + 2 << ": type=" << type_val << ", a=" << a << ", b=" << b << " (n_elements=" << n_elements << ")" << std::endl;
-            ops.clear();
-            return false;
+             std::cerr << "Error: Invalid operation data at line " << i + 2 << ": type=" << type_val << ", a=" << a << ", b=" << b << " (n_elements=" << n_elements << ")" << std::endl;
+             ops.clear();
+             return false;
         }
 
-        // Create UnionFind::Operation object directly
-        Operation op;
-        op.type = (type_val == 0) ? OperationType::UNION_OP : OperationType::FIND_OP;
+        // Create CanonicalOperation object directly
+        CanonicalOperation op;
+        op.type = (type_val == 0) ? CanonicalOperationType::UNION_OP : CanonicalOperationType::FIND_OP;
         op.a = a;
         op.b = b; // b is ignored for FIND_OP by the implementations
         ops.push_back(op);
@@ -86,6 +86,18 @@ bool load_operations(const std::string& filename, int& n_elements, std::vector<O
 
     std::cout << "Successfully loaded " << ops.size() << " operations for " << n_elements << " elements from " << filename << std::endl;
     return true;
+}
+
+// Helper function to convert between compatible Operation structs
+// This assumes the structs have the same members (type, a, b).
+template <typename TargetOp, typename SourceOp>
+TargetOp convert_operation(const SourceOp& source_op) {
+    TargetOp target_op;
+    // Use static_cast for the enum type conversion
+    target_op.type = static_cast<decltype(TargetOp::type)>(source_op.type);
+    target_op.a = source_op.a;
+    target_op.b = source_op.b;
+    return target_op;
 }
 
 
@@ -114,21 +126,21 @@ int main(int argc, char* argv[]) {
     }
 
     if (num_runs <= 0) {
-        std::cerr << "Error: Number of runs must be positive." << std::endl;
-        return 1;
+         std::cerr << "Error: Number of runs must be positive." << std::endl;
+         return 1;
     }
 
 
     // --- Load Operations ---
     int n_elements;
-    // Use the alias UnionFind::Operation here
-    std::vector<Operation> operations;
-    if (!load_operations(ops_file, n_elements, operations)) {
+    // Load into the canonical vector type
+    std::vector<CanonicalOperation> canonical_operations;
+    if (!load_operations(ops_file, n_elements, canonical_operations)) {
         return 1; // Error loading data
     }
-    if (operations.empty()) {
-        std::cerr << "Error: No operations loaded." << std::endl;
-        return 1;
+    if (canonical_operations.empty()) {
+         std::cerr << "Error: No operations loaded." << std::endl;
+         return 1;
     }
 
 
@@ -137,8 +149,8 @@ int main(int argc, char* argv[]) {
         omp_set_num_threads(num_threads);
         std::cout << "Using OpenMP with " << num_threads << " threads." << std::endl;
     } else {
-        num_threads = 1; // Serial runs on 1 thread
-        std::cout << "Running serial implementation (1 thread)." << std::endl;
+         num_threads = 1; // Serial runs on 1 thread
+         std::cout << "Running serial implementation (1 thread)." << std::endl;
     }
 
 
@@ -150,33 +162,51 @@ int main(int argc, char* argv[]) {
     std::cout << "\nStarting benchmark..." << std::endl;
     std::cout << "Implementation: " << impl_type << std::endl;
     std::cout << "Element Count:  " << n_elements << std::endl;
-    std::cout << "Operation Count:" << operations.size() << std::endl;
+    std::cout << "Operation Count:" << canonical_operations.size() << std::endl;
     std::cout << "Number of Runs: " << num_runs << std::endl;
     std::cout << "Threads:        " << num_threads << std::endl;
 
 
     // Lambda to run the benchmark for a given UF type
-    // The type of uf_instance will be deduced, and its processOperations
-    // should accept std::vector<UnionFind::Operation> (or compatible).
+    // Takes a prototype instance just to deduce the type
     auto run_benchmark = [&](auto& uf_instance_prototype) {
-        // Warm-up run (optional but recommended)
-        { // Scope for temporary warm-up instance
-            // Create instance based on prototype type
-            auto temp_uf = std::make_unique<std::remove_reference_t<decltype(uf_instance_prototype)>>(n_elements);
+        // Deduce the specific Operation type required by this UF implementation
+        using SpecificUF = std::remove_reference_t<decltype(uf_instance_prototype)>;
+        using SpecificOperation = typename SpecificUF::Operation; // Get the nested Operation type
+
+        // --- Perform conversion once before warm-up and timed runs ---
+        std::vector<SpecificOperation> specific_operations;
+        specific_operations.reserve(canonical_operations.size());
+        std::transform(canonical_operations.begin(), canonical_operations.end(),
+                       std::back_inserter(specific_operations),
+                       convert_operation<SpecificOperation, CanonicalOperation>);
+        // --- Conversion complete ---
+
+
+        // Warm-up run
+        {
+            auto temp_uf = std::make_unique<SpecificUF>(n_elements);
             std::cout << "Performing warm-up run..." << std::endl;
-            temp_uf->processOperations(operations, results); // Pass the vector<UnionFind::Operation>
+            // Pass the correctly typed vector
+            temp_uf->processOperations(specific_operations, results);
             std::cout << "Warm-up complete." << std::endl;
-        } // temp_uf destroyed here
+        }
+
 
         // Timed runs
         for (int i = 0; i < num_runs; ++i) {
-            // Create a fresh instance for each run to reset state
-            auto current_uf = std::make_unique<std::remove_reference_t<decltype(uf_instance_prototype)>>(n_elements);
+            // Create a fresh instance for each run
+            auto current_uf = std::make_unique<SpecificUF>(n_elements);
 
+            // --- Timing starts HERE ---
             auto start_time = std::chrono::high_resolution_clock::now();
-            // Pass the vector<UnionFind::Operation> - this should now match expectations
-            current_uf->processOperations(operations, results);
+
+            // Pass the correctly typed vector
+            current_uf->processOperations(specific_operations, results);
+
             auto end_time = std::chrono::high_resolution_clock::now();
+            // --- Timing ends HERE ---
+
 
             std::chrono::duration<double, std::milli> duration_ms = end_time - start_time;
             durations.push_back(duration_ms.count());
@@ -187,49 +217,49 @@ int main(int argc, char* argv[]) {
 
     // --- Select Implementation and Run Benchmark ---
     try {
-        if (impl_type == "serial") {
-            UnionFind uf_proto(n_elements); // Create a prototype instance
-            run_benchmark(uf_proto);
-        }
-        #ifdef UNIONFIND_COARSE_ENABLED
-        else if (impl_type == "coarse") {
-            UnionFindParallelCoarse uf_proto(n_elements);
-            run_benchmark(uf_proto);
-        }
-        #endif
-        #ifdef UNIONFIND_FINE_ENABLED
-        else if (impl_type == "fine") {
-            UnionFindParallelFine uf_proto(n_elements);
-            run_benchmark(uf_proto);
-        }
-        #endif
-        #ifdef UNIONFIND_LOCKFREE_ENABLED
-        else if (impl_type == "lockfree") {
-            UnionFindParallelLockFree uf_proto(n_elements);
-            run_benchmark(uf_proto);
-        }
-        #endif
-        else {
-            std::cerr << "Error: Unknown implementation type '" << impl_type << "'." << std::endl;
-            std::cerr << "Supported types: serial";
-            #ifdef UNIONFIND_COARSE_ENABLED
-            std::cerr << ", coarse";
-            #endif
-            #ifdef UNIONFIND_FINE_ENABLED
-            std::cerr << ", fine";
-            #endif
-            #ifdef UNIONFIND_LOCKFREE_ENABLED
-            std::cerr << ", lockfree";
-            #endif
-            std::cerr << std::endl;
-            return 1;
-        }
+         if (impl_type == "serial") {
+             UnionFind uf_proto(n_elements); // Create a prototype instance
+             run_benchmark(uf_proto);
+         }
+         #ifdef UNIONFIND_COARSE_ENABLED
+         else if (impl_type == "coarse") {
+             UnionFindParallelCoarse uf_proto(n_elements);
+             run_benchmark(uf_proto);
+         }
+         #endif
+         #ifdef UNIONFIND_FINE_ENABLED
+         else if (impl_type == "fine") {
+             UnionFindParallelFine uf_proto(n_elements);
+             run_benchmark(uf_proto);
+         }
+         #endif
+         #ifdef UNIONFIND_LOCKFREE_ENABLED
+         else if (impl_type == "lockfree") {
+             UnionFindParallelLockFree uf_proto(n_elements);
+             run_benchmark(uf_proto);
+         }
+         #endif
+         else {
+             std::cerr << "Error: Unknown implementation type '" << impl_type << "'." << std::endl;
+             std::cerr << "Supported types: serial";
+             #ifdef UNIONFIND_COARSE_ENABLED
+             std::cerr << ", coarse";
+             #endif
+             #ifdef UNIONFIND_FINE_ENABLED
+             std::cerr << ", fine";
+             #endif
+             #ifdef UNIONFIND_LOCKFREE_ENABLED
+             std::cerr << ", lockfree";
+             #endif
+             std::cerr << std::endl;
+             return 1;
+         }
     } catch (const std::exception& e) {
-        std::cerr << "An exception occurred during benchmarking: " << e.what() << std::endl;
-        return 1;
+         std::cerr << "An exception occurred during benchmarking: " << e.what() << std::endl;
+         return 1;
     } catch (...) {
-        std::cerr << "An unknown exception occurred during benchmarking." << std::endl;
-        return 1;
+         std::cerr << "An unknown exception occurred during benchmarking." << std::endl;
+         return 1;
     }
 
 
@@ -257,7 +287,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Implementation: " << impl_type << std::endl;
     std::cout << "Threads:        " << num_threads << std::endl;
     std::cout << "Element Count:  " << n_elements << std::endl;
-    std::cout << "Operation Count:" << operations.size() << std::endl;
+    std::cout << "Operation Count:" << canonical_operations.size() << std::endl;
     std::cout << "Number of Runs: " << num_runs << std::endl;
     std::cout << "-------------------------" << std::endl;
     std::cout << "Avg Time:       " << avg_duration << " ms" << std::endl;
