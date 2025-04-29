@@ -76,8 +76,6 @@ bool UnionFindParallelFine::unionSets(int a, int b)
         std::lock_guard<std::mutex> guard2(locks[lock2_idx]);
 
         // *** Critical Section Start ***
-        // Re-verify the roots *while holding the locks* using non-compressing find.
-        // This ensures we are working with the actual current roots under lock.
         int currentRootA = find_root_no_compression(a);
         int currentRootB = find_root_no_compression(b);
 
