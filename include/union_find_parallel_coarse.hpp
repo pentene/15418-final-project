@@ -4,7 +4,7 @@
 #include <vector>
 #include <mutex>
 #include <cassert> // Include for assertions
-#include <numeric> // Required for std::iota if used, though not strictly needed here
+#include <numeric>
 
 // Enum to define the type of operatio
 // --- Coarse-Grained Lock Union-Find Class ---
@@ -13,16 +13,19 @@
 // Operations are protected by a single global recursive mutex.
 // Includes basic input validation via assertions.
 // The interface is consistent with the UnionFindParallelLockFree class.
-class UnionFindParallelCoarse {
+class UnionFindParallelCoarse 
+{
 public:
-    enum class OperationType {
+    enum class OperationType 
+    {
         UNION_OP,
         FIND_OP,
         SAMESET_OP // Check if two elements are in the same set
     };
 
     // Structure to represent an operation
-    struct Operation {
+    struct Operation 
+    {
         OperationType type;
         int a;
         int b; // Used for UNION_OP and SAMESET_OP
@@ -75,7 +78,6 @@ private:
     int num_elements;                   // Store the size for bounds checking
     mutable std::recursive_mutex coarse_lock; // Coarse-grained lock protecting all operations.
                                         // Recursive to allow find() called within unionSets()/sameSet() under the same lock.
-                                        // Marked mutable to allow locking in const methods like size() if needed (though not needed here).
+                                        // Marked mutable to allow locking in const methods like size() if needed.
 };
-
 #endif // UNION_FIND_PARALLEL_COARSE_HPP

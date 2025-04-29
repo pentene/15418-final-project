@@ -4,16 +4,12 @@
 #include <vector>
 #include <atomic>
 #include <utility> // For std::pair
-#include <stdexcept> // For std::runtime_error, std::out_of_range, std::invalid_argument
-
-// --- Operation Definition ---
-// Assuming these are defined globally or in a shared header.
-// If not, define them here or include the relevant header.
-
+#include <stdexcept>
 
 // --- Lock-Free Union-Find Class with Plain Write Path Compaction ---
 
-class UnionFindParallelLockFreePlainWrite {
+class UnionFindParallelLockFreePlainWrite 
+{
 private:
     // Represents the parent/rank information.
     // If A[i] >= 0, it's the parent index.
@@ -22,18 +18,21 @@ private:
     std::vector<std::atomic<int>> A;
 
     // Helper to check if a value represents a root (negative value)
-    static inline bool is_root(int val) {
+    static inline bool is_root(int val) 
+    {
         return val < 0;
     }
 
     // Helper to get the rank from a root's value
-    static inline int get_rank(int root_val) {
+    static inline int get_rank(int root_val) 
+    {
         // Assumes is_root(root_val) is true
         return -(root_val + 1);
     }
 
     // Helper to create the value to store for a root with a given rank
-    static inline int make_root_val(int rank) {
+    static inline int make_root_val(int rank) 
+    {
         return -(rank + 1);
     }
 

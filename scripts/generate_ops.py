@@ -4,10 +4,19 @@ import os
 import math
 import sys
 
-def generate_operations(n_elements, n_operations, find_ratio, sameset_ratio, contention_level, hot_element_index, output_filename):
+def generate_operations(
+    n_elements,
+    n_operations,
+    find_ratio,
+    sameset_ratio,
+    contention_level,
+    hot_element_index,
+    extreme_contention,
+    output_filename
+):
     """
-    Generates a file containing Union-Find operations (UNION=0, FIND=1, SAMESET=2)
-    using a focused contention model where one element is accessed more frequently.
+    Generates a file containing Union-Find operations (UNION=0, FIND=1, SAMESET=2).
+    Supports uniform, focused (hot element), or extreme (elements 0 and 1 only) contention.
 
     Args:
         n_elements (int): The number of elements (0 to n_elements-1).
@@ -15,10 +24,9 @@ def generate_operations(n_elements, n_operations, find_ratio, sameset_ratio, con
         find_ratio (float): The desired ratio of FIND operations (0.0 to 1.0).
         sameset_ratio (float): The desired ratio of SAMESET operations *within*
                                the non-FIND operations (0.0 to 1.0).
-        contention_level (float): Controls the focus of operations (0.0 low, 1.0 high).
-                                  0.0: Ops spread uniformly.
-                                  1.0: Ops heavily focused on hot_element_index.
-        hot_element_index (int): The index of the element to focus contention on.
+        contention_level (float): Controls focus for 'focused' mode (0.0 low, 1.0 high). Ignored if extreme_contention is True.
+        hot_element_index (int): Index for focused contention. Ignored if extreme_contention is True.
+        extreme_contention (bool): If True, forces all operations onto elements 0 and 1.
         output_filename (str): The path to the output file.
     """
     # --- Input Validation ---
@@ -26,50 +34,60 @@ def generate_operations(n_elements, n_operations, find_ratio, sameset_ratio, con
         raise ValueError("find_ratio must be between 0.0 and 1.0")
     if not (0.0 <= sameset_ratio <= 1.0):
         raise ValueError("sameset_ratio must be between 0.0 and 1.0")
-    if not (0.0 <= contention_level <= 1.0):
-        raise ValueError("contention_level must be between 0.0 and 1.0")
+    if not extreme_contention and not (0.0 <= contention_level <= 1.0):
+        raise ValueError("contention_level must be between 0.0 and 1.0 unless --extreme-contention is used")
     if n_elements <= 0:
         raise ValueError("n_elements must be positive")
+    if extreme_contention and n_elements < 2:
+        raise ValueError("n_elements must be at least 2 for --extreme-contention mode")
     if n_operations <= 0:
         raise ValueError("n_operations must be positive")
-    if not (0 <= hot_element_index < n_elements):
-        raise ValueError(f"hot_element_index ({hot_element_index}) must be between 0 and {n_elements-1}")
-
-    # --- Calculate Hot Element Access Probability ---
-    if n_elements == 1:
-        print("Note: n_elements is 1. Only FIND(0) operations are possible.", file=sys.stderr)
-        find_ratio = 1.0 # Force all ops to be FIND
-        hot_access_prob = 1.0 # Only one element to choose
-    else:
-        # Probability of choosing the hot element directly.
-        # Scales from uniform probability (1/N) at contention 0
-        # up to a high probability (e.g., 80%) at contention 1.
-        # Adjust the 0.8 factor to control max focus.
-        max_focus_prob = 0.8
-        uniform_prob = 1.0 / n_elements
-        hot_access_prob = contention_level * max_focus_prob + (1.0 - contention_level) * uniform_prob
-        # Ensure probability is capped at 1.0 (shouldn't happen with max_focus_prob <= 1)
-        hot_access_prob = min(1.0, hot_access_prob)
+    if not extreme_contention and not (0 <= hot_element_index < n_elements):
+        raise ValueError(f"hot_element_index ({hot_element_index}) must be between 0 and {n_elements-1} unless --extreme-contention is used")
 
     print(f"Generating {n_operations} operations for {n_elements} elements...")
     print(f"Target FIND ratio: {find_ratio:.2f}")
     print(f"Target SAMESET ratio (of non-FIND ops): {sameset_ratio:.2f}")
-    print(f"Contention Level: {contention_level:.2f} -> Focused on element {hot_element_index}")
-    print(f"  Probability of accessing element {hot_element_index} directly: {hot_access_prob:.4f}")
-    print(f"Output file: {output_filename}")
 
-    # --- Helper function to select an element based on contention ---
-    def select_element():
-        if n_elements == 1:
-            return 0
-        if random.random() < hot_access_prob:
-            return hot_element_index
-        else:
-            # Choose any element uniformly *other than* the hot one?
-            # Or choose any element uniformly including the hot one?
-            # Let's choose uniformly from all elements for simplicity.
-            # The high hot_access_prob already creates the focus.
-            return random.randint(0, n_elements - 1)
+    # --- Contention Mode Setup ---
+    hot_access_prob = 0.0 # Default
+    select_element_func = None
+
+    if extreme_contention:
+        print("Contention Mode: Extreme (Operations focused exclusively on elements 0 and 1)")
+        # No need for probability calculation or select_element function in this mode
+    elif n_elements == 1:
+        print("Note: n_elements is 1. Only FIND(0) operations are possible.", file=sys.stderr)
+        find_ratio = 1.0 # Force all ops to be FIND
+        hot_access_prob = 1.0 # Only one element to choose
+        hot_element_index = 0
+        print(f"Contention Level: N/A (n_elements=1)")
+        def select_element_single():
+             return 0
+        select_element_func = select_element_single
+    else:
+        # Calculate Hot Element Access Probability for focused mode
+        max_focus_prob = 0.95 # Using the 0.95 value discussed
+        uniform_prob = 1.0 / n_elements
+        hot_access_prob = contention_level * max_focus_prob + (1.0 - contention_level) * uniform_prob
+        hot_access_prob = min(1.0, hot_access_prob) # Ensure probability is capped
+
+        print(f"Contention Mode: Focused on element {hot_element_index}")
+        print(f"  Contention Level: {contention_level:.2f}")
+        print(f"  Probability of accessing element {hot_element_index} directly: {hot_access_prob:.4f}")
+
+        # --- Helper function to select an element based on focused contention ---
+        # Need to define it here so it captures the calculated hot_access_prob and hot_element_index
+        def select_element_focused():
+            if random.random() < hot_access_prob:
+                return hot_element_index
+            else:
+                # Choose any element uniformly among all elements
+                return random.randint(0, n_elements - 1)
+        select_element_func = select_element_focused
+
+
+    print(f"Output file: {output_filename}")
 
     # --- Ensure Output Directory Exists ---
     output_dir = os.path.dirname(output_filename)
@@ -91,7 +109,9 @@ def generate_operations(n_elements, n_operations, find_ratio, sameset_ratio, con
             find_count = 0
             union_count = 0
             sameset_count = 0
-            hot_element_accesses = 0 # Track accesses to the hot element
+            # Track accesses involving elements 0 or 1 in extreme mode, or the hot element otherwise
+            relevant_element_accesses = 0
+            relevant_element_indices = set([0, 1]) if extreme_contention else set([hot_element_index])
 
             for i in range(n_operations):
                 op_type_val = -1 # Placeholder
@@ -101,42 +121,58 @@ def generate_operations(n_elements, n_operations, find_ratio, sameset_ratio, con
                 # Decide if FIND or non-FIND
                 is_find_op = (random.random() < find_ratio) or (n_elements == 1)
 
-                if is_find_op:
-                    # --- Generate FIND operation ---
-                    op_type_val = 1
-                    a = select_element()
-                    if a == hot_element_index:
-                        hot_element_accesses += 1
-                    # 'b' is ignored for FIND, set to 0 for consistency
-                    b = 0
-                    find_count += 1
-                else:
-                    # --- Generate non-FIND (UNION or SAMESET) ---
-                    # This block only runs if n_elements > 1
-                    op_type_val = 0 # Default to UNION
-
-                    # Select 'a'
-                    a = select_element()
-                    if a == hot_element_index:
-                        hot_element_accesses += 1
-
-                    # Select 'b' ensuring b != a
-                    while True:
-                        b = select_element()
-                        if a != b:
-                            if b == hot_element_index:
-                                hot_element_accesses += 1
-                            break
-                        # If a == b, the access to b doesn't count yet,
-                        # as it wasn't a valid selection for the operation.
-
-                    # Decide if UNION or SAMESET based on sameset_ratio
-                    if random.random() < sameset_ratio:
-                        op_type_val = 2 # SAMESET
-                        sameset_count += 1
+                if extreme_contention:
+                    # --- Extreme Contention Logic ---
+                    if is_find_op:
+                        op_type_val = 1
+                        a = random.choice([0, 1]) # FIND(0) or FIND(1)
+                        b = 0 # Ignored
+                        find_count += 1
+                        if a in relevant_element_indices: relevant_element_accesses += 1
                     else:
-                        op_type_val = 0 # UNION
-                        union_count += 1
+                        # UNION(0, 1) or SAMESET(0, 1)
+                        a = 0
+                        b = 1
+                        if random.random() < sameset_ratio:
+                            op_type_val = 2 # SAMESET
+                            sameset_count += 1
+                        else:
+                            op_type_val = 0 # UNION
+                            union_count += 1
+                        # Both a and b are relevant
+                        if a in relevant_element_indices: relevant_element_accesses += 1
+                        if b in relevant_element_indices: relevant_element_accesses += 1
+
+                else:
+                    # --- Focused or Uniform Contention Logic ---
+                    if is_find_op:
+                        op_type_val = 1
+                        a = select_element_func()
+                        if a in relevant_element_indices:
+                            relevant_element_accesses += 1
+                        b = 0 # Ignored
+                        find_count += 1
+                    else:
+                        # Select 'a'
+                        a = select_element_func()
+                        if a in relevant_element_indices:
+                            relevant_element_accesses += 1
+
+                        # Select 'b' ensuring b != a
+                        while True:
+                            b = select_element_func()
+                            if a != b:
+                                if b in relevant_element_indices:
+                                    relevant_element_accesses += 1
+                                break
+
+                        # Decide if UNION or SAMESET based on sameset_ratio
+                        if random.random() < sameset_ratio:
+                            op_type_val = 2 # SAMESET
+                            sameset_count += 1
+                        else:
+                            op_type_val = 0 # UNION
+                            union_count += 1
 
                 # Write operation: <type> <a> <b>
                 f.write(f"{op_type_val} {a} {b}\n")
@@ -149,14 +185,18 @@ def generate_operations(n_elements, n_operations, find_ratio, sameset_ratio, con
             non_find_count = union_count + sameset_count
             actual_sameset_ratio = sameset_count / non_find_count if non_find_count > 0 else 0 # Ratio within non-FIND ops
             total_element_accesses = find_count + 2 * non_find_count # Count accesses for a and b
-            actual_hot_access_ratio = hot_element_accesses / total_element_accesses if total_element_accesses > 0 else 0
+            actual_relevant_access_ratio = relevant_element_accesses / total_element_accesses if total_element_accesses > 0 else 0
 
             print(f"Actual FIND operations:    {find_count:>10} ({actual_find_ratio:.4f})")
             print(f"Actual UNION operations:   {union_count:>10}")
             print(f"Actual SAMESET operations: {sameset_count:>10}")
             if non_find_count > 0:
                  print(f"  (SAMESET ratio of non-FIND: {actual_sameset_ratio:.4f})")
-            print(f"Total accesses to hot element ({hot_element_index}): {hot_element_accesses:>6} / {total_element_accesses} ({actual_hot_access_ratio:.4f})")
+
+            if extreme_contention:
+                 print(f"Total accesses involving elements 0 or 1: {relevant_element_accesses:>6} / {total_element_accesses} ({actual_relevant_access_ratio:.4f})")
+            elif n_elements > 1:
+                 print(f"Total accesses to hot element ({hot_element_index}): {relevant_element_accesses:>6} / {total_element_accesses} ({actual_relevant_access_ratio:.4f})")
             print("-" * 30)
 
     except IOError as e:
@@ -167,7 +207,7 @@ def generate_operations(n_elements, n_operations, find_ratio, sameset_ratio, con
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Generate operation files for Union-Find benchmarking (UNION=0, FIND=1, SAMESET=2) using focused contention on a specific element.",
+        description="Generate operation files for Union-Find benchmarking (UNION=0, FIND=1, SAMESET=2). Supports uniform, focused, or extreme contention.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter # Show defaults in help
     )
 
@@ -178,10 +218,13 @@ if __name__ == "__main__":
                         help="Target ratio of FIND operations (0.0 to 1.0).")
     parser.add_argument("--sameset-ratio", type=float, default=0.1,
                         help="Target ratio of SAMESET operations *within the non-FIND* operations (0.0 to 1.0).")
+    # Contention arguments - only one mode active at a time
     parser.add_argument("--contention-level", type=float, default=0.0,
-                        help="Level of contention focus on the hot element (0.0=low/uniform, 1.0=high/focused).")
+                        help="Level of contention focus on the hot element (0.0=low/uniform, 1.0=high/focused). Ignored if --extreme-contention is used.")
     parser.add_argument("--hot-element", type=int, default=0,
-                        help="Index of the element to focus contention on.")
+                        help="Index of the element for focused contention. Ignored if --extreme-contention is used.")
+    parser.add_argument("--extreme-contention", action="store_true",
+                        help="Use extreme contention mode: all operations target only elements 0 and 1. Overrides --contention-level and --hot-element.")
     parser.add_argument("--seed", type=int, default=None,
                         help="Optional random seed for reproducibility.")
 
@@ -194,9 +237,12 @@ if __name__ == "__main__":
 
     # --- Run Generator ---
     try:
-        # Validate hot_element index *after* n_elements is parsed
-        if not (0 <= args.hot_element < args.n_elements):
-             raise ValueError(f"--hot-element ({args.hot_element}) must be between 0 and n_elements-1 ({args.n_elements-1})")
+        # Validate hot_element index only if not in extreme mode
+        if not args.extreme_contention and not (0 <= args.hot_element < args.n_elements):
+            raise ValueError(f"--hot-element ({args.hot_element}) must be between 0 and n_elements-1 ({args.n_elements-1}) unless --extreme-contention is used.")
+        # Validate n_elements for extreme mode
+        if args.extreme_contention and args.n_elements < 2:
+            raise ValueError(f"n_elements ({args.n_elements}) must be at least 2 for --extreme-contention mode.")
 
         generate_operations(
             args.n_elements,
@@ -204,7 +250,8 @@ if __name__ == "__main__":
             args.find_ratio,
             args.sameset_ratio,
             args.contention_level,
-            args.hot_element, # Pass the hot element index
+            args.hot_element,
+            args.extreme_contention, # Pass the flag
             args.output_file
         )
     except ValueError as e:
@@ -213,4 +260,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"An unexpected error occurred: {e}", file=sys.stderr)
         sys.exit(1) # Exit with error code
-

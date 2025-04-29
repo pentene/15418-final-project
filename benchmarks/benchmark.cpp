@@ -12,7 +12,6 @@
 #include <cmath>       // For std::sqrt
 #include <type_traits> // For std::remove_reference_t
 
-// Include your Union-Find implementations
 // Assuming union_find.hpp defines the canonical OperationType and Operation struct
 #include "union_find.hpp" // Serial (defines CanonicalOperation)
 
@@ -43,19 +42,23 @@ using CanonicalOperationType = UnionFind::OperationType;
 // <type> <a> <b>  (type: 0 for UNION, 1 for FIND, 2 for SAMESET)
 // ...
 // Loads into std::vector<CanonicalOperation>
-bool load_operations(const std::string& filename, int& n_elements, std::vector<CanonicalOperation>& ops) {
+bool load_operations(const std::string& filename, int& n_elements, std::vector<CanonicalOperation>& ops) 
+{
     std::ifstream infile(filename);
-    if (!infile) {
+    if (!infile) 
+    {
         std::cerr << "Error: Cannot open file: " << filename << std::endl;
         return false;
     }
 
     size_t n_ops;
-    if (!(infile >> n_elements >> n_ops)) {
+    if (!(infile >> n_elements >> n_ops)) 
+    {
         std::cerr << "Error: Could not read number of elements and operations from file: " << filename << std::endl;
         return false;
     }
-    if (n_elements <= 0) {
+    if (n_elements <= 0) 
+    {
         std::cerr << "Error: Invalid number of elements read from file: " << n_elements << std::endl;
         return false;
     }
@@ -64,8 +67,10 @@ bool load_operations(const std::string& filename, int& n_elements, std::vector<C
     ops.reserve(n_ops);
     int type_val, a, b;
 
-    for (size_t i = 0; i < n_ops; ++i) {
-        if (!(infile >> type_val >> a >> b)) {
+    for (size_t i = 0; i < n_ops; ++i) 
+    {
+        if (!(infile >> type_val >> a >> b)) 
+        {
             std::cerr << "Error: Failed to read operation " << i+1 << " from file." << std::endl;
             ops.clear(); // Clear partial data
             return false;
@@ -73,19 +78,22 @@ bool load_operations(const std::string& filename, int& n_elements, std::vector<C
 
         // --- Validation ---
         // 1. Check valid type value
-        if (type_val < 0 || type_val > 2) { // Now allowing 0, 1, 2
+        if (type_val < 0 || type_val > 2) 
+        {
             std::cerr << "Error: Invalid operation type at line " << i + 2 << ": type=" << type_val << " (must be 0, 1, or 2)" << std::endl;
             ops.clear();
             return false;
         }
         // 2. Check index 'a' bounds (required for all ops)
-        if (a < 0 || a >= n_elements) {
+        if (a < 0 || a >= n_elements) 
+        {
             std::cerr << "Error: Invalid index 'a' at line " << i + 2 << ": a=" << a << " (n_elements=" << n_elements << ")" << std::endl;
             ops.clear();
             return false;
         }
         // 3. Check index 'b' bounds (required for UNION and SAMESET)
-        if (type_val == 0 || type_val == 2) { // UNION or SAMESET
+        if (type_val == 0 || type_val == 2) 
+        {
             if (b < 0 || b >= n_elements) {
                 std::cerr << "Error: Invalid index 'b' for UNION/SAMESET op at line " << i + 2 << ": b=" << b << " (n_elements=" << n_elements << ")" << std::endl;
                 ops.clear();
@@ -94,14 +102,14 @@ bool load_operations(const std::string& filename, int& n_elements, std::vector<C
         }
         // --- End Validation ---
 
-
         // Create CanonicalOperation object directly
         CanonicalOperation op;
         op.a = a;
         op.b = b; // Store b; it will be ignored by find/unionSets/sameSet if not needed
 
         // Assign the correct enum type based on the integer value read
-        switch (type_val) {
+        switch (type_val) 
+        {
             case 0: op.type = CanonicalOperationType::UNION_OP; break;
             case 1: op.type = CanonicalOperationType::FIND_OP; break;
             case 2: op.type = CanonicalOperationType::SAMESET_OP; break;
@@ -110,7 +118,8 @@ bool load_operations(const std::string& filename, int& n_elements, std::vector<C
         ops.push_back(op);
     }
 
-    if (ops.size() != n_ops) {
+    if (ops.size() != n_ops) 
+    {
         std::cerr << "Warning: Expected " << n_ops << " operations, but read " << ops.size() << "." << std::endl;
         // Decide if this is a fatal error or just a warning
     }
@@ -123,7 +132,8 @@ bool load_operations(const std::string& filename, int& n_elements, std::vector<C
 // Helper function to convert between compatible Operation structs
 // Assumes the structs have the same members (type, a, b) and compatible enum values.
 template <typename TargetOp, typename SourceOp>
-TargetOp convert_operation(const SourceOp& source_op) {
+TargetOp convert_operation(const SourceOp& source_op) 
+{
     TargetOp target_op;
     // Use static_cast for the enum type conversion. This relies on the enum values
     // (e.g., UNION_OP=0, FIND_OP=1, SAMESET_OP=2) being consistent across implementations.
@@ -135,8 +145,10 @@ TargetOp convert_operation(const SourceOp& source_op) {
 
 
 // --- Main Benchmark Function ---
-int main(int argc, char* argv[]) {
-    if (argc < 4) {
+int main(int argc, char* argv[]) 
+{
+    if (argc < 4) 
+    {
         std::cerr << "Usage: " << argv[0] << " <implementation_type> <operations_file> <num_runs> [num_threads]" << std::endl;
         std::cerr << "  implementation_type: serial, coarse, fine, lockfree, lockfree_plain, lockfree_ipc" << std::endl;
         std::cerr << "  operations_file: Path to the file containing operations (Type: 0=UNION, 1=FIND, 2=SAMESET)." << std::endl;
@@ -150,7 +162,8 @@ int main(int argc, char* argv[]) {
     int num_runs = std::stoi(argv[3]);
     int num_threads = omp_get_max_threads(); // Default to max threads
 
-    if (argc > 4) {
+    if (argc > 4) 
+    {
         num_threads = std::stoi(argv[4]);
         if (num_threads <= 0) {
             std::cerr << "Warning: Invalid number of threads specified (" << argv[4] << "). Using default (" << omp_get_max_threads() << ")." << std::endl;
@@ -158,34 +171,36 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    if (num_runs <= 0) {
+    if (num_runs <= 0) 
+    {
         std::cerr << "Error: Number of runs must be positive." << std::endl;
         return 1;
     }
-
 
     // --- Load Operations ---
     int n_elements;
     // Load into the canonical vector type
     std::vector<CanonicalOperation> canonical_operations;
-    if (!load_operations(ops_file, n_elements, canonical_operations)) {
+    if (!load_operations(ops_file, n_elements, canonical_operations)) 
+    {
         return 1; // Error loading data
     }
-    if (canonical_operations.empty()) {
-         std::cerr << "Error: No operations loaded." << std::endl;
-         return 1;
+    if (canonical_operations.empty()) 
+    {
+        std::cerr << "Error: No operations loaded." << std::endl;
+        return 1;
     }
 
-
     // --- Configure OpenMP ---
-    if (impl_type != "serial") {
+    if (impl_type != "serial") 
+    {
         omp_set_num_threads(num_threads);
         std::cout << "Using OpenMP with " << num_threads << " threads." << std::endl;
-    } else {
+    } else 
+    {
         num_threads = 1; // Serial runs on 1 thread
         std::cout << "Running serial implementation (1 thread)." << std::endl;
     }
-
 
     // --- Benchmarking ---
     std::vector<double> durations; // Store durations in milliseconds
@@ -199,10 +214,10 @@ int main(int argc, char* argv[]) {
     std::cout << "Number of Runs: " << num_runs << std::endl;
     std::cout << "Threads:        " << num_threads << std::endl;
 
-
     // Lambda to run the benchmark for a given UF type
     // Takes a prototype instance just to deduce the type
-    auto run_benchmark = [&](auto& uf_instance_prototype) {
+    auto run_benchmark = [&](auto& uf_instance_prototype) 
+    {
         // Deduce the specific Operation type required by this UF implementation
         using SpecificUF = std::remove_reference_t<decltype(uf_instance_prototype)>;
         using SpecificOperation = typename SpecificUF::Operation; // Get the nested Operation type
@@ -215,7 +230,6 @@ int main(int argc, char* argv[]) {
                        convert_operation<SpecificOperation, CanonicalOperation>);
         // --- Conversion complete ---
 
-
         // Warm-up run
         {
             // Use unique_ptr for automatic memory management
@@ -226,9 +240,9 @@ int main(int argc, char* argv[]) {
             std::cout << "Warm-up complete." << std::endl;
         }
 
-
         // Timed runs
-        for (int i = 0; i < num_runs; ++i) {
+        for (int i = 0; i < num_runs; ++i) 
+        {
             // Create a fresh instance for each run
             auto current_uf = std::make_unique<SpecificUF>(n_elements);
 
@@ -241,13 +255,13 @@ int main(int argc, char* argv[]) {
             auto end_time = std::chrono::high_resolution_clock::now();
             // --- Timing ends HERE ---
 
-
             std::chrono::duration<double, std::milli> duration_ms = end_time - start_time;
             durations.push_back(duration_ms.count());
             std::cout << "Run " << (i + 1) << ": " << duration_ms.count() << " ms" << std::endl;
 
             // Optional: Add basic validation check on results size after first run
-            if (i == 0 && results.size() != specific_operations.size()) {
+            if (i == 0 && results.size() != specific_operations.size()) 
+            {
                  std::cerr << "Warning: Results vector size (" << results.size()
                            << ") does not match operations vector size (" << specific_operations.size()
                            << ") after first run." << std::endl;
@@ -255,44 +269,51 @@ int main(int argc, char* argv[]) {
         }
     };
 
-
     // --- Select Implementation and Run Benchmark ---
-    try {
-        if (impl_type == "serial") {
+    try 
+    {
+        if (impl_type == "serial") 
+        {
             UnionFind uf_proto(n_elements); // Create a prototype instance
             run_benchmark(uf_proto);
         }
         #ifdef UNIONFIND_COARSE_ENABLED
-        else if (impl_type == "coarse") {
+        else if (impl_type == "coarse") 
+        {
             UnionFindParallelCoarse uf_proto(n_elements);
             run_benchmark(uf_proto);
         }
         #endif
         #ifdef UNIONFIND_FINE_ENABLED
-        else if (impl_type == "fine") {
+        else if (impl_type == "fine") 
+        {
             UnionFindParallelFine uf_proto(n_elements);
             run_benchmark(uf_proto);
         }
         #endif
         #ifdef UNIONFIND_LOCKFREE_ENABLED
-        else if (impl_type == "lockfree") {
+        else if (impl_type == "lockfree") 
+        {
             UnionFindParallelLockFree uf_proto(n_elements);
             run_benchmark(uf_proto);
         }
         #endif
         #ifdef UNIONFIND_LOCKFREE_PLAIN_ENABLED // New implementation
-        else if (impl_type == "lockfree_plain") {
+        else if (impl_type == "lockfree_plain") 
+        {
             UnionFindParallelLockFreePlainWrite uf_proto(n_elements);
             run_benchmark(uf_proto);
         }
         #endif
         #ifdef UNIONFIND_LOCKFREE_IPC_ENABLED // New implementation
-        else if (impl_type == "lockfree_ipc") {
+        else if (impl_type == "lockfree_ipc") 
+        {
             UnionFindParallelLockFreeIPC uf_proto(n_elements);
             run_benchmark(uf_proto);
         }
         #endif
-        else {
+        else 
+        {
             std::cerr << "Error: Unknown implementation type '" << impl_type << "'." << std::endl;
             std::cerr << "Supported types: serial";
             #ifdef UNIONFIND_COARSE_ENABLED
@@ -313,17 +334,19 @@ int main(int argc, char* argv[]) {
             std::cerr << std::endl;
             return 1;
         }
-    } catch (const std::exception& e) {
+    } catch (const std::exception& e) 
+    {
         std::cerr << "An exception occurred during benchmarking: " << e.what() << std::endl;
         return 1;
-    } catch (...) {
+    } catch (...) 
+    {
         std::cerr << "An unknown exception occurred during benchmarking." << std::endl;
         return 1;
     }
 
-
     // --- Calculate and Print Results ---
-    if (durations.empty()) {
+    if (durations.empty()) 
+    {
         std::cerr << "Error: No benchmark runs were completed successfully." << std::endl;
         return 1;
     }
@@ -335,12 +358,12 @@ int main(int argc, char* argv[]) {
 
     // Calculate standard deviation
     double sq_sum = 0.0;
-    for(double d : durations) {
+    for(double d : durations) 
+    {
         sq_sum += (d - avg_duration) * (d - avg_duration);
     }
     // Use n-1 for sample standard deviation, handle n=1 case.
     double std_dev = (durations.size() > 1) ? std::sqrt(sq_sum / (durations.size() - 1)) : 0.0;
-
 
     std::cout << "\n--- Benchmark Summary ---" << std::endl;
     std::cout << std::fixed << std::setprecision(4); // Format output
@@ -365,8 +388,9 @@ int main(int argc, char* argv[]) {
     perf_command += " " + impl_type;
     perf_command += " " + ops_file;
     perf_command += " " + std::to_string(num_runs);
-    if (argc > 4) { // Include thread count if provided
-         perf_command += " " + std::to_string(num_threads);
+    if (argc > 4) 
+    { 
+        perf_command += " " + std::to_string(num_threads);
     }
     std::cout << "  " << perf_command << std::endl;
     std::cout << "Alternatively, consider using libraries like PAPI (Performance Application Programming Interface)." << std::endl;

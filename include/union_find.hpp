@@ -9,13 +9,15 @@
 // and Union by Rank. Includes basic input validation via assertions.
 // Defines Operation types and a function to process a list of operations,
 // consistent with the parallel versions for benchmarking.
-class UnionFind {
+class UnionFind 
+{
 public:
     // Supported operation types.
     enum class OperationType { UNION_OP, FIND_OP, SAMESET_OP };
 
     // Operation structure consistent with parallel versions.
-    struct Operation {
+    struct Operation 
+    {
         OperationType type;
         int a;
         int b; // Used for UNION_OP and SAMESET_OP, ignored for FIND_OP

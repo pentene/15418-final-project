@@ -8,7 +8,8 @@
 
 // --- Lock-Free Union-Find Class ---
 
-class UnionFindParallelLockFree {
+class UnionFindParallelLockFree 
+{
 private:
 
     // Represents the parent/rank information.
@@ -19,18 +20,21 @@ private:
 
     // Helper to check if a value represents a root (negative value)
     // Corresponds to isRank() in the pseudocode, but checks the value itself
-    static inline bool is_root(int val) {
+    static inline bool is_root(int val) 
+    {
         return val < 0;
     }
 
     // Helper to get the rank from a root's value
-    static inline int get_rank(int root_val) {
+    static inline int get_rank(int root_val) 
+    {
         // Assumes is_root(root_val) is true
         return -(root_val + 1);
     }
 
     // Helper to create the value to store for a root with a given rank
-    static inline int make_root_val(int rank) {
+    static inline int make_root_val(int rank) 
+    {
         return -(rank + 1);
     }
 
@@ -40,17 +44,17 @@ private:
     // but simplified to only return the root, rank is handled separately if needed.
     std::pair<int, int> find_internal(int u);
 
-
 public:
-
-    enum class OperationType {
+    enum class OperationType 
+    {
         UNION_OP,
         FIND_OP,
         SAMESET_OP // Check if two elements are in the same set
     };
 
     // Structure to represent an operation
-    struct Operation {
+    struct Operation 
+    {
         OperationType type;
         int a;
         int b; // Ignored for FIND_OP

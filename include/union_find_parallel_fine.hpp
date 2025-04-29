@@ -6,22 +6,7 @@
 #include <numeric> // For std::iota
 #include <cassert> // For assertions
 #include <algorithm> // For std::min/max
-#include <memory> // For potentially managing mutexes if needed (though vector often works)
-
-// Enum to define the type of operation
-enum class OperationType {
-    UNION_OP,
-    FIND_OP,
-    SAMESET_OP // Check if two elements are in the same set
-};
-
-// Structure to represent an operation
-struct Operation {
-    OperationType type;
-    int a;
-    int b; // Used for UNION_OP and SAMESET_OP
-};
-
+#include <memory> // For potentially managing mutexes if needed
 
 // --- Fine-Grained Lock Union-Find Class ---
 
@@ -29,17 +14,20 @@ struct Operation {
 // Each element has its own mutex, primarily used to lock roots during union operations.
 // Path compression in find is best-effort due to potential races without complex traversal locking.
 // Union operations are carefully locked to ensure correctness.
-class UnionFindParallelFine {
+class UnionFindParallelFine 
+{
 public:
 
-    enum class OperationType {
+    enum class OperationType 
+    {
         UNION_OP,
         FIND_OP,
         SAMESET_OP // Check if two elements are in the same set
     };
 
     // Structure to represent an operation
-    struct Operation {
+    struct Operation 
+    {
         OperationType type;
         int a;
         int b; // Used for UNION_OP and SAMESET_OP
