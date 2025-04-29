@@ -139,7 +139,6 @@ run_benchmark: $(BENCHMARK_BIN)
 # Clean up generated files.
 clean:
 	@echo "Cleaning..."
-# IMPORTANT: The next line MUST start with a Tab character, not spaces.
 	rm -f $(OBJ_FILES) $(LIB_NAME) $(TEST_SERIAL_BIN) $(TEST_PARALLEL_BIN) $(BENCHMARK_BIN) src/*.o tests/*.o benchmarks/*.o *~ core.*
 
 ###############################################################################
@@ -149,7 +148,6 @@ clean:
 # Depends on ALL object files determined above
 $(LIB_NAME): $(OBJ_FILES)
 	@echo "Archiving $(LIB_NAME)..."
-# IMPORTANT: The next line MUST start with a Tab character, not spaces.
 	ar rcs $(LIB_NAME) $(OBJ_FILES) # Use the final OBJ_FILES list
 
 ###############################################################################
@@ -160,7 +158,6 @@ $(LIB_NAME): $(OBJ_FILES)
 # Output .o files will be placed in the same directory as the .cpp file.
 %.o: %.cpp
 	@echo "Compiling $< ..."
-# IMPORTANT: The next line MUST start with a Tab character, not spaces.
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 ###############################################################################
@@ -170,13 +167,12 @@ $(LIB_NAME): $(OBJ_FILES)
 # Link serial test (usually doesn't need OpenMP or atomic, but include CXXFLAGS for consistency)
 $(TEST_SERIAL_BIN): $(TEST_SERIAL_SRC) $(LIB_NAME)
 	@echo "Linking $@ ..."
-# IMPORTANT: The next line MUST start with a Tab character, not spaces.
 	$(CXX) $(CXXFLAGS) $(TEST_SERIAL_SRC) -o $(TEST_SERIAL_BIN) -L. -lunionfind
 
 # Link parallel test (needs OpenMP, and atomic if any lockfree enabled)
 $(TEST_PARALLEL_BIN): $(TEST_PARALLEL_SRC) $(LIB_NAME)
 	@echo "Linking $@ ..."
-# IMPORTANT: The next line MUST start with a Tab character, not spaces.
+
 	$(CXX) $(CXXFLAGS) $(TEST_PARALLEL_SRC) -o $(TEST_PARALLEL_BIN) -L. -lunionfind -fopenmp $(LDFLAGS_ATOMIC)
 
 ###############################################################################
@@ -186,6 +182,5 @@ $(TEST_PARALLEL_BIN): $(TEST_PARALLEL_SRC) $(LIB_NAME)
 # Link the benchmark executable (needs OpenMP, and atomic if any lockfree enabled)
 $(BENCHMARK_BIN): $(BENCHMARK_SRC) $(LIB_NAME)
 	@echo "Linking $@ ..."
-# IMPORTANT: The next line MUST start with a Tab character, not spaces.
 	$(CXX) $(CXXFLAGS) $(BENCHMARK_SRC) -o $(BENCHMARK_BIN) -L. -lunionfind -fopenmp $(LDFLAGS_ATOMIC)
 

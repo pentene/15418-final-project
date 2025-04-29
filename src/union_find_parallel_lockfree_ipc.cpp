@@ -169,8 +169,6 @@ bool UnionFindParallelLockFreeIPC::unionSets(int a, int b)
     } 
 }
 
-// Checks if elements 'a' and 'b' are in the same set (lock-free)
-// Includes Immediate Parent Check (IPC) optimization.
 bool UnionFindParallelLockFreeIPC::sameSet(int a, int b) 
 {
     if (a < 0 || a >= n_elements || b < 0 || b >= n_elements) 

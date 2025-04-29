@@ -73,7 +73,7 @@ void UnionFindParallelCoarse::processOperations(const std::vector<Operation>& op
     #pragma omp parallel for schedule(static)
     for (int i = 0; i < static_cast<int>(nOps); i++) 
     {
-        const auto& op = ops[i]; // Use a const reference for readability.
+        const auto& op = ops[i];
         assert(op.a >= 0 && op.a < num_elements && "Operation element 'a' out of bounds.");
 
         switch (op.type) 
