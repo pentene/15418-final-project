@@ -24,34 +24,6 @@ This project implements and compares several sequential and parallel versions of
 * **Dataset Generation:** Python 3.
 * **Operating System:** Developed and tested on Linux. Lock-free implementations rely on efficient native atomic support.
 
-## Directory Structure
-.
-├── Makefile                # Build configuration
-├── README.md               # This file
-├── datasets/
-├── include/                # Header files (.hpp)
-│   ├── union_find.hpp
-│   ├── union_find_parallel_coarse.hpp
-│   ├── union_find_parallel_fine.hpp
-│   ├── union_find_parallel_lockfree.hpp
-│   ├── union_find_parallel_lockfree_ipc.hpp
-│   └── union_find_parallel_lockfree_plain_write.hpp
-├── src/                    # Source files (.cpp)
-│   ├── union_find.cpp
-│   ├── union_find_parallel_coarse.cpp
-│   ├── union_find_parallel_fine.cpp
-│   ├── union_find_parallel_lockfree.cpp
-│   ├── union_find_parallel_lockfree_ipc.cpp
-│   └── union_find_parallel_lockfree_plain_write.cpp
-├── tests/                  # Test code and resources
-│   ├── benchmark.cpp           # Benchmarking program source
-│   ├── test_parallel_correctness.cpp # Correctness test source
-│   └── test_serial_correctness.cpp   # Simple serial test source
-│   └── resources/            # Directory for storing datasets
-│       └── (Example datasets...)
-├── scripts/
-│   └── generate_operations.py  # Python script for generating datasets
-
 ## Building the Code
 
 The project uses a `Makefile` for building the library and executables.
@@ -76,7 +48,7 @@ make
 
 Simply use `make` to build the project and `make clean` to delete all compiled files
 
-**Generating Datasets:**
+## Generating Datasets
 
 Use the generate_operations.py script to create input files for testing and benchmarking.
 
@@ -97,7 +69,7 @@ Options:
 * --extreme-contention: Flag to force all operations onto elements 0 and 1.
 * --seed <int>: Optional random seed for reproducibility.
 
-**Running Correctness Tests:**
+## Running Correctness Tests: 
 
 Verify parallel implementations against the serial baseline:
 
@@ -109,7 +81,7 @@ Example:
 
 The test will output PASS or FAIL for each enabled parallel implementation.
 
-**Running Benchmarks:**
+## Running Benchmarks:**
 
 Measure execution time for different implementations:
 
